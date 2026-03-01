@@ -1,0 +1,21 @@
+{
+  "name": "cmoney-ai-chat",
+  "version": "1.0.0",
+  "private": true,
+  "description": "AI Chat System for CMoney Authors",
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "dev:widget": "npm run dev -w @cmoney/chat-widget",
+    "dev:admin": "npm run dev -w @cmoney/admin-dashboard",
+    "dev:backend": "npm run dev -w @cmoney/backend",
+    "build:widget": "npm run build -w @cmoney/chat-widget",
+    "build:admin": "npm run build -w @cmoney/admin-dashboard",
+    "build:all": "npm run build -w @cmoney/chat-widget && npm run build -w @cmoney/admin-dashboard",
+    "deploy:backend": "npm run deploy -w @cmoney/backend"
+  },
+  "devDependencies": {
+    "typescript": "^5.8.2"
+  }
+}
