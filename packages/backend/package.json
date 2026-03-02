@@ -9,7 +9,7 @@
     "start": "node lib/server.js"
   },
   "engines": {
-    "node": "20"
+    "node": ">=20"
   },
   "dependencies": {
     "@google/generative-ai": "^0.21.0",
