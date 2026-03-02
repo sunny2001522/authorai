@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { X, Link as LinkIcon } from 'lucide-react';
+import { X, Plus, Link as LinkIcon } from 'lucide-react';
 import { updateKnowledge, getCategories, KnowledgeItem } from '../../services/api';
 
 interface EditKnowledgeModalProps {
@@ -9,7 +9,7 @@ interface EditKnowledgeModalProps {
   onSaved: () => void;
 }
 
-// 可編輯的下拉選單組件（含「其他」選項）
+// 可編輯的下拉選單組件（與 TextInputModal 一致）
 function EditableSelect({
   value,
   options,
@@ -21,68 +21,65 @@ function EditableSelect({
   placeholder: string;
   onChange: (value: string) => void;
 }) {
-  const [isCustom, setIsCustom] = useState(false);
-  const OTHER_VALUE = '__OTHER__';
-
-  // 判斷當前值是否為自訂值（不在選項列表中）
+  // 判斷當前值是否為自訂值（不在選項列表中且非空）
   const isCustomValue = value && !options.includes(value);
+  const [isCustom, setIsCustom] = useState(isCustomValue);
 
-  // 進入自訂模式時的 select value
-  const selectValue = isCustom || isCustomValue ? OTHER_VALUE : value;
-
-  const handleSelectChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    const selectedValue = e.target.value;
-    if (selectedValue === OTHER_VALUE) {
+  // 當值變化時，更新 isCustom 狀態
+  useEffect(() => {
+    if (value && !options.includes(value)) {
       setIsCustom(true);
-      onChange(''); // 清空讓用戶輸入新值
-    } else {
-      setIsCustom(false);
-      onChange(selectedValue);
     }
-  };
-
-  const handleBackToSelect = () => {
-    setIsCustom(false);
-    // 如果當前值不在選項中，清空它
-    if (!options.includes(value)) {
-      onChange('');
-    }
-  };
+  }, [value, options]);
 
   return (
     <div className="relative">
-      {isCustom || isCustomValue ? (
+      {isCustom ? (
         <div className="flex gap-2">
           <input
             type="text"
             value={value}
             onChange={(e) => onChange(e.target.value)}
-            placeholder="輸入新分類..."
+            placeholder={placeholder}
             className="input flex-1"
             autoFocus
           />
           <button
-            onClick={handleBackToSelect}
+            onClick={() => {
+              setIsCustom(false);
+              // 如果當前值不在選項中，清空它
+              if (!options.includes(value)) {
+                onChange('');
+              }
+            }}
             className="btn-secondary px-3"
-            title="返回選單"
+            title="選擇現有"
           >
             ↓
           </button>
         </div>
       ) : (
-        <select
-          value={selectValue}
-          onChange={handleSelectChange}
-          className="input w-full bg-dark-card"
-        >
-          <option value="">{placeholder}</option>
-          {options.map((opt) => (
-            <option key={opt} value={opt}>
-              {opt}
-            </option>
-          ))}
-          <option value={OTHER_VALUE}>其他...</option>
-        </select>
+        <div className="flex gap-2">
+          <select
+            value={value}
+            onChange={(e) => onChange(e.target.value)}
+            className="input flex-1 bg-dark-card"
+          >
+            <option value="">{placeholder}</option>
+            {options.map((opt) => (
+              <option key={opt} value={opt}>
+                {opt}
+              </option>
+            ))}
+          </select>
+          <button
+            onClick={() => setIsCustom(true)}
+            className="btn-secondary px-3"
+            title="新增"
+          >
+            <Plus className="w-4 h-4" />
+          </button>
+        </div>
       )}
     </div>
   );
@@ -257,7 +254,7 @@ export function EditKnowledgeModal({ adminKey, item, onClose, onSaved }: EditKno
           {/* 連結 */}
           <div>
             <label className="block text-sm font-medium text-gray-300 mb-2">
-              連結按鈕
+              連結按鈕（選填）
             </label>
             <div className="flex gap-2 items-center">
               <LinkIcon className="w-4 h-4 text-gray-500 flex-shrink-0" />

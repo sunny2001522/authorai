@@ -295,16 +295,21 @@ function ConversationsView({
                         </p>
                       </div>
                       {/* 連結按鈕 */}
-                      {msg.linkUrl && msg.linkText && (
+                      {msg.linkUrl && (
                         <div className={`mt-2 ${msg.role === "assistant" ? "text-right" : ""}`}>
                           <a
                             href={msg.linkUrl}
                             target="_blank"
                             rel="noopener noreferrer"
-                            className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-[#b20a2c]/10 text-[#b20a2c] text-sm rounded-lg hover:bg-[#b20a2c]/20 transition-colors"
+                            className="inline-flex flex-col items-start px-3 py-1.5 bg-[#b20a2c]/10 text-[#b20a2c] text-sm rounded-lg hover:bg-[#b20a2c]/20 transition-colors"
                           >
-                            {msg.linkText}
-                            <ExternalLink size={14} />
+                            <span className="flex items-center gap-1.5">
+                              <LinkIcon size={14} />
+                              {msg.linkText || '連結'}
+                            </span>
+                            <span className="text-xs text-gray-500 mt-0.5 break-all text-left">
+                              {msg.linkUrl}
+                            </span>
                           </a>
                         </div>
                       )}
@@ -573,16 +578,21 @@ function ConversationsView({
                           </p>
                         </div>
                         {/* 連結按鈕 */}
-                        {msg.linkUrl && msg.linkText && (
+                        {msg.linkUrl && (
                           <div className={`mt-2 ${msg.role === "assistant" ? "text-right" : ""}`}>
                             <a
                               href={msg.linkUrl}
                               target="_blank"
                               rel="noopener noreferrer"
-                              className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-[#b20a2c]/10 text-[#b20a2c] text-sm rounded-lg hover:bg-[#b20a2c]/20 transition-colors"
+                              className="inline-flex flex-col items-start px-3 py-1.5 bg-[#b20a2c]/10 text-[#b20a2c] text-sm rounded-lg hover:bg-[#b20a2c]/20 transition-colors"
                             >
-                              {msg.linkText}
-                              <ExternalLink size={14} />
+                              <span className="flex items-center gap-1.5">
+                                <LinkIcon size={14} />
+                                {msg.linkText || '連結'}
+                              </span>
+                              <span className="text-xs text-gray-500 mt-0.5 break-all text-left">
+                                {msg.linkUrl}
+                              </span>
                             </a>
                           </div>
                         )}
@@ -782,7 +792,9 @@ function KnowledgeView({
       title?: string;
       content?: string;
       category?: string;
-      sub_category?: string;
+      subcategory1?: string;
+      linkText?: string;
+      linkUrl?: string;
     },
   ) => {
     try {
@@ -872,6 +884,8 @@ function KnowledgeCard({
     content?: string;
     category?: string;
     subcategory1?: string;
+    linkText?: string;
+    linkUrl?: string;
   }) => void;
   onDelete: () => void;
 }) {
@@ -879,6 +893,8 @@ function KnowledgeCard({
   const [content, setContent] = useState(item.content || "");
   const [category, setCategory] = useState(item.category || "");
   const [subCategory, setSubCategory] = useState(item.subcategory1 || "");
+  const [linkText, setLinkText] = useState(item.linkText || "");
+  const [linkUrl, setLinkUrl] = useState(item.linkUrl || "");
   const [saving, setSaving] = useState(false);
   const titleRef = useRef<HTMLInputElement>(null);
   const contentRef = useRef<HTMLTextAreaElement>(null);
@@ -889,6 +905,8 @@ function KnowledgeCard({
     setContent(item.content || "");
     setCategory(item.category || "");
     setSubCategory(item.subcategory1 || "");
+    setLinkText(item.linkText || "");
+    setLinkUrl(item.linkUrl || "");
   }, [item]);
 
   // Auto focus title when entering edit mode
@@ -914,6 +932,8 @@ function KnowledgeCard({
       content,
       category: category.trim() || undefined,
       subcategory1: subCategory.trim() || undefined,
+      linkText: linkText.trim() || undefined,
+      linkUrl: linkUrl.trim() || undefined,
     });
     setSaving(false);
   };
@@ -1053,6 +1073,52 @@ function KnowledgeCard({
         <p className="mt-2 text-sm text-gray-600 line-clamp-3">
           {item.content}
         </p>
+      )}
+
+      {/* Link editing */}
+      {isEditing && (
+        <div className="mt-3 p-3 bg-white rounded-lg border border-gray-200">
+          <div className="flex items-center gap-2 mb-2">
+            <LinkIcon size={14} className="text-gray-500" />
+            <span className="text-xs text-gray-500">連結按鈕（選填）</span>
+          </div>
+          <div className="flex gap-2">
+            <input
+              type="text"
+              value={linkText}
+              onChange={(e) => setLinkText(e.target.value)}
+              onKeyDown={handleKeyDown}
+              placeholder="連結名稱"
+              className="flex-1 px-3 py-1.5 text-sm bg-gray-50 border border-gray-200 rounded-lg outline-none focus:border-[#b20a2c] transition-colors"
+            />
+            <input
+              type="url"
+              value={linkUrl}
+              onChange={(e) => setLinkUrl(e.target.value)}
+              onKeyDown={handleKeyDown}
+              placeholder="https://..."
+              className="flex-[2] px-3 py-1.5 text-sm bg-gray-50 border border-gray-200 rounded-lg outline-none focus:border-[#b20a2c] transition-colors"
+            />
+          </div>
+        </div>
+      )}
+
+      {/* Link display */}
+      {!isEditing && item.linkUrl && (
+        <div className="mt-3 flex flex-col">
+          <a
+            href={item.linkUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-1.5 text-sm text-[#b20a2c] hover:underline"
+          >
+            <LinkIcon size={14} />
+            {item.linkText || '連結'}
+          </a>
+          <span className="text-xs text-gray-400 mt-0.5 break-all">
+            {item.linkUrl}
+          </span>
+        </div>
       )}
 
       {/* Footer: hit count + timestamps */}

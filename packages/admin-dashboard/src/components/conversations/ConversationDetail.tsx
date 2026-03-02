@@ -155,6 +155,23 @@ export function ConversationDetail({ adminKey, convId }: ConversationDetailProps
                 <p className="text-sm text-gray-200 whitespace-pre-wrap text-left">
                   {message.content}
                 </p>
+                {/* 顯示連結按鈕（如果有） */}
+                {message.linkText && message.linkUrl && (
+                  <a
+                    href={message.linkUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex flex-col items-start mt-2 px-3 py-1.5 bg-white/10 border border-white/20 rounded-lg text-xs hover:bg-white/20 transition-colors"
+                  >
+                    <span className="flex items-center gap-1.5 text-blue-400">
+                      <LinkIcon className="w-3 h-3" />
+                      {message.linkText}
+                    </span>
+                    <span className="text-gray-400 text-[10px] mt-0.5 break-all">
+                      {message.linkUrl}
+                    </span>
+                  </a>
+                )}
               </div>
               <p className={`text-xs text-gray-600 mt-1 px-1 ${message.role === 'user' ? '' : 'text-right'}`}>
                 {format(new Date(message.created_at), 'HH:mm')}

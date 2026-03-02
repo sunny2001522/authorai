@@ -173,9 +173,14 @@ export function KnowledgeList({ adminKey }: KnowledgeListProps) {
                   <div className="flex items-center gap-3 text-sm text-gray-500 mt-1">
                     {item.linkUrl && (
                       <>
-                        <span className="flex items-center gap-1 text-gold">
-                          <LinkIcon className="w-3 h-3" />
-                          {item.linkText || '連結'}
+                        <span className="flex flex-col">
+                          <span className="flex items-center gap-1 text-gold">
+                            <LinkIcon className="w-3 h-3" />
+                            {item.linkText || '連結'}
+                          </span>
+                          <span className="text-gray-500 text-[10px] truncate max-w-[200px]" title={item.linkUrl}>
+                            {item.linkUrl}
+                          </span>
                         </span>
                         <span>•</span>
                       </>

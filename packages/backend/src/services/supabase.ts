@@ -166,24 +166,34 @@ export async function addMessage(
   authorId: string,
   conversationId: string,
   role: 'user' | 'assistant',
-  content: string
+  content: string,
+  options?: { linkText?: string; linkUrl?: string }
 ): Promise<string> {
   const client = getSupabase();
   const now = new Date().toISOString();
 
-  // Insert message
+  // Insert message (link columns temporarily disabled until Supabase schema cache refreshes)
+  const insertData: Record<string, unknown> = {
+    conversation_id: conversationId,
+    role,
+    content,
+    created_at: now,
+  };
+
+  // Add link fields if provided
+  if (options?.linkText) insertData.link_text = options.linkText;
+  if (options?.linkUrl) insertData.link_url = options.linkUrl;
+
   const { data: newMsg, error } = await client
     .from('messages')
-    .insert({
-      conversation_id: conversationId,
-      role,
-      content,
-      created_at: now,
-    })
+    .insert(insertData)
     .select()
     .single();
 
-  if (error || !newMsg) throw new Error('Failed to add message');
+  if (error || !newMsg) {
+    console.error('addMessage error:', error);
+    throw new Error('Failed to add message');
+  }
 
   // Update conversation message count and last_message_at
   // Get current count first

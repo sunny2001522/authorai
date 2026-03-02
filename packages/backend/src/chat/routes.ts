@@ -79,13 +79,39 @@ chatRouter.post('/:authorSlug/message', async (req: any, res: any) => {
 
         // ========== 意圖匹配規則 ==========
 
+        // 【課程報名相關 - 最高優先級】
+        // 匹配：美股課、台股課、課程、報名、上課等
+        // 必須在股票推薦規則之前，避免「美股課」被股票規則攔截
+        const isCourseQuery = queryLower.match(/美股課|台股課|課程|報名|上課|學習|體驗|講座|免費課/);
+        if (isCourseQuery) {
+          // 特定課程匹配（美股課）
+          if (queryLower.includes('美股')) {
+            if (combined.includes('美股') && (combined.includes('課') || combined.includes('報名'))) {
+              score += 60;  // 最高優先級，超過股票推薦的 50 分
+            }
+          }
+          // 特定課程匹配（台股課）
+          else if (queryLower.includes('台股')) {
+            if (combined.includes('台股') || combined.includes('課程') || combined.includes('報名')) {
+              score += 55;
+            }
+          }
+          // 一般課程查詢
+          else if (combined.includes('課程') || combined.includes('報名') || combined.includes('課')) {
+            score += 25;  // 高於股票推薦的一般匹配 20 分
+          }
+        }
+
         // 股票推薦/買賣相關 → 匹配「想要老師講特定的股票」
         // 各種問法：買哪檔、推薦什麼、哪支股票、個股分析、明牌、飆股、好股等
         // 也包含股票代號（如 0050, 2330, AAPL, TSLA 等）
+        // 注意：已移除單獨的「股」字，避免「美股課」被誤判
         const isStockRecommendQuestion = queryLower.match(
-          /股票|股|買|賣|推薦|個股|明牌|飆股|好股|哪檔|哪支|哪一檔|什麼股|看好|看漲|看跌|進場|出場|加碼|存股|標的|投資.*什麼|\d{4,6}|[a-z]{2,5}/i
+          /股票|買|賣|推薦|個股|明牌|飆股|好股|哪檔|哪支|哪一檔|什麼股|看好|看漲|看跌|進場|出場|加碼|存股|標的|投資.*什麼|\d{4,6}|[a-z]{2,5}/i
         );
-        if (isStockRecommendQuestion) {
+        // 排除課程相關查詢（避免「美股課」被誤判為股票推薦）
+        const isCourseRelated = queryLower.match(/課|報名|上課|學習|體驗|講座/);
+        if (isStockRecommendQuestion && !isCourseRelated) {
           // 優先匹配「想要老師講特定的股票」這篇
           if (titleLower.includes('股票') && titleLower.includes('老師')) {
             score += 50;  // 最高優先級
@@ -107,11 +133,6 @@ chatRouter.post('/:authorSlug/message', async (req: any, res: any) => {
         // 群組相關
         if (queryLower.match(/群|社群|加入|連結/)) {
           if (combined.includes('群')) score += 15;
-        }
-
-        // 課程相關
-        if (queryLower.match(/課程|報名|免費|講座|體驗/)) {
-          if (combined.includes('課程') || combined.includes('報名')) score += 15;
         }
 
         // 付款/退款相關
@@ -152,22 +173,22 @@ chatRouter.post('/:authorSlug/message', async (req: any, res: any) => {
       const knowledgeContent = relevantKnowledge[0].content;
       const hasLink = relevantKnowledge[0].link_text && relevantKnowledge[0].link_url;
 
-      const enhancedPrompt = `你是 Niko 學姊，一位親切的美股投資助理。
+      const enhancedPrompt = `你是恩如老師的助理，親切友善地回答問題。
 
 【核心任務】
-用戶問了一個問題，你要根據知識庫內容回答。
+根據知識庫內容回答用戶問題，不要自己編造內容。
 
 【知識庫內容】
 ${knowledgeContent}
 
 【回答規則】
-1. 用口語化、親切的方式傳達知識庫的內容
-2. 像朋友私訊聊天的語氣，自然不做作
-3. 每次用不同的表達方式，絕對不要重複之前說過的話
-4. 可以用一個表情符號結尾（每次用不同的）
-5. 不要說「學弟」「學妹」「您」，直接說「你」
-6. ${hasLink ? '提到可以點下方按鈕了解更多' : ''}
-7. 控制在 20-40 字以內`;
+1. 直接根據知識庫內容回答，不要額外發揮
+2. 用口語化、親切的方式傳達
+3. 不要說「學弟」「學妹」「您」，直接說「你」
+4. ${hasLink ? '提到可以點下方按鈕了解更多' : ''}
+5. 控制在 20-40 字以內
+6. 可以加一個表情符號結尾
+7. 除非知識庫內容有提到「恩寶AI」，否則不要提「恩寶AI」或「強棒旺旺來」`;
 
       aiResponse = await generateResponse({
         systemPrompt: enhancedPrompt,
@@ -192,12 +213,26 @@ ${knowledgeContent}
       console.log(`AI generated answer: "${aiResponse}"`);
     }
 
-    // Save AI response
+    // 收集相關知識的連結（使用第一個有連結的知識項目）
+    let linkText: string | undefined;
+    let linkUrl: string | undefined;
+    for (const k of relevantKnowledge) {
+      console.log(`Checking knowledge "${k.title}" for link: link_text=${k.link_text}, link_url=${k.link_url}`);
+      if (k.link_text && k.link_url) {
+        linkText = k.link_text;
+        linkUrl = k.link_url;
+        console.log(`Found link: ${linkText} -> ${linkUrl}`);
+        break;  // 只取第一個有連結的
+      }
+    }
+
+    // Save AI response with link info
     const messageId = await addMessage(
       author.id,
       conversation.id,
       'assistant',
-      aiResponse
+      aiResponse,
+      { linkText, linkUrl }
     );
 
     // Generate summary for new conversations after a few messages
@@ -218,19 +253,6 @@ ${knowledgeContent}
             : firstUserMessage.content;
           await updateConversationSummary(author.id, conversation.id, fallbackSummary);
         }
-      }
-    }
-
-    // 收集相關知識的連結（使用第一個有連結的知識項目）
-    let linkText: string | undefined;
-    let linkUrl: string | undefined;
-    for (const k of relevantKnowledge) {
-      console.log(`Checking knowledge "${k.title}" for link: link_text=${k.link_text}, link_url=${k.link_url}`);
-      if (k.link_text && k.link_url) {
-        linkText = k.link_text;
-        linkUrl = k.link_url;
-        console.log(`Found link: ${linkText} -> ${linkUrl}`);
-        break;  // 只取第一個有連結的
       }
     }
 
