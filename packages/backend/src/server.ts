@@ -13,29 +13,8 @@ import { adminRouter } from './admin/routes';
 const app = express();
 const PORT = process.env.PORT || 3001;
 
-// CORS 設定
-// /chat 路由開放給所有網站（因為 widget 會被嵌入到各種網站）
-// /admin 路由只允許特定來源
-const adminAllowedOrigins = [
-  'http://localhost:3000',
-  'http://localhost:3002',
-  'http://localhost:5173',
-  process.env.ADMIN_URL,
-].filter(Boolean) as string[];
-
-app.use('/chat', cors({ origin: true }));  // Chat API 開放所有來源
-
-app.use('/admin', cors({
-  origin: (origin: any, callback: any) => {
-    if (!origin) return callback(null, true);
-    if (adminAllowedOrigins.includes(origin) || process.env.NODE_ENV !== 'production') {
-      callback(null, true);
-    } else {
-      callback(new Error('Not allowed by CORS'));
-    }
-  },
-  credentials: true
-}));
+// CORS 設定 - 開放所有來源（簡化部署）
+app.use(cors({ origin: true, credentials: true }));
 app.use(express.json());
 
 // Routes
