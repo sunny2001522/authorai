@@ -1,6 +1,7 @@
 /**
  * Express 伺服器
  */
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
@@ -25,7 +26,7 @@ const adminAllowedOrigins = [
 app.use('/chat', cors({ origin: true }));  // Chat API 開放所有來源
 
 app.use('/admin', cors({
-  origin: (origin, callback) => {
+  origin: (origin: any, callback: any) => {
     if (!origin) return callback(null, true);
     if (adminAllowedOrigins.includes(origin) || process.env.NODE_ENV !== 'production') {
       callback(null, true);
@@ -42,7 +43,7 @@ app.use('/chat', chatRouter);
 app.use('/admin', adminRouter);
 
 // Health check
-app.get('/health', (req, res) => {
+app.get('/health', (_req: any, res: any) => {
   res.json({ status: 'ok', timestamp: Date.now() });
 });
 

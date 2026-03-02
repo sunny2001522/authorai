@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { Router } from 'express';
 import multer from 'multer';
 import {
@@ -46,7 +47,7 @@ const getAuthor = async (req: any, res: any, next: any) => {
 
 // GET /admin/authors
 // List all authors
-adminRouter.get('/authors', async (req, res) => {
+adminRouter.get('/authors', async (_req: any, res: any) => {
   try {
     const authors = await getAllAuthors();
 
@@ -68,7 +69,7 @@ adminRouter.get('/authors', async (req, res) => {
 
 // GET /admin/:slug/info
 // Get author info
-adminRouter.get('/:slug/info', getAuthor, async (req: any, res) => {
+adminRouter.get('/:slug/info', getAuthor, async (req: any, res: any) => {
   try {
     const { author } = req;
 
@@ -90,7 +91,7 @@ adminRouter.get('/:slug/info', getAuthor, async (req: any, res) => {
 
 // GET /admin/:slug/conversations
 // List all conversations for an author
-adminRouter.get('/:slug/conversations', getAuthor, async (req: any, res) => {
+adminRouter.get('/:slug/conversations', getAuthor, async (req: any, res: any) => {
   try {
     const { author } = req;
     const conversations = await getAuthorConversations(author.id);
@@ -111,7 +112,7 @@ adminRouter.get('/:slug/conversations', getAuthor, async (req: any, res) => {
 
 // GET /admin/:slug/conversations/:convId
 // Get conversation details with messages
-adminRouter.get('/:slug/conversations/:convId', getAuthor, async (req: any, res) => {
+adminRouter.get('/:slug/conversations/:convId', getAuthor, async (req: any, res: any) => {
   try {
     const { author } = req;
     const { convId } = req.params;
@@ -138,7 +139,7 @@ adminRouter.get('/:slug/conversations/:convId', getAuthor, async (req: any, res)
 
 // POST /admin/:slug/conversations/:convId/reply
 // Send admin reply to conversation
-adminRouter.post('/:slug/conversations/:convId/reply', getAuthor, async (req: any, res) => {
+adminRouter.post('/:slug/conversations/:convId/reply', getAuthor, async (req: any, res: any) => {
   try {
     const { author } = req;
     const { convId } = req.params;
@@ -179,7 +180,7 @@ adminRouter.post('/:slug/conversations/:convId/reply', getAuthor, async (req: an
 
 // DELETE /admin/:slug/conversations/:convId
 // Delete a conversation and all its messages
-adminRouter.delete('/:slug/conversations/:convId', getAuthor, async (req: any, res) => {
+adminRouter.delete('/:slug/conversations/:convId', getAuthor, async (req: any, res: any) => {
   try {
     const { author } = req;
     const { convId } = req.params;
@@ -197,7 +198,7 @@ adminRouter.delete('/:slug/conversations/:convId', getAuthor, async (req: any, r
 
 // GET /admin/:slug/knowledge
 // List all knowledge items (including shared items with author_id = null)
-adminRouter.get('/:slug/knowledge', getAuthor, async (req: any, res) => {
+adminRouter.get('/:slug/knowledge', getAuthor, async (req: any, res: any) => {
   try {
     const { author } = req;
     const items = await getKnowledgeItems(author.id);
@@ -229,7 +230,7 @@ adminRouter.get('/:slug/knowledge', getAuthor, async (req: any, res) => {
 
 // GET /admin/:slug/knowledge/categories
 // Get all unique categories for dropdowns
-adminRouter.get('/:slug/knowledge/categories', getAuthor, async (req: any, res) => {
+adminRouter.get('/:slug/knowledge/categories', getAuthor, async (req: any, res: any) => {
   try {
     const { author } = req;
     const items = await getKnowledgeItems(author.id);
@@ -288,7 +289,7 @@ adminRouter.get('/:slug/knowledge/categories', getAuthor, async (req: any, res) 
 
 // POST /admin/:slug/knowledge/text
 // Add text knowledge
-adminRouter.post('/:slug/knowledge/text', getAuthor, async (req: any, res) => {
+adminRouter.post('/:slug/knowledge/text', getAuthor, async (req: any, res: any) => {
   try {
     const { author } = req;
     const { title, content, category, subcategory1, subcategory2, subcategory3, linkText, linkUrl, isShared } = req.body;
@@ -320,7 +321,7 @@ adminRouter.post('/:slug/knowledge/text', getAuthor, async (req: any, res) => {
 
 // PUT /admin/:slug/knowledge/:itemId
 // Update knowledge item
-adminRouter.put('/:slug/knowledge/:itemId', getAuthor, async (req: any, res) => {
+adminRouter.put('/:slug/knowledge/:itemId', getAuthor, async (req: any, res: any) => {
   try {
     const { author } = req;
     const { itemId } = req.params;
@@ -346,7 +347,7 @@ adminRouter.put('/:slug/knowledge/:itemId', getAuthor, async (req: any, res) => 
 
 // DELETE /admin/:slug/knowledge/:itemId
 // Delete knowledge item
-adminRouter.delete('/:slug/knowledge/:itemId', getAuthor, async (req: any, res) => {
+adminRouter.delete('/:slug/knowledge/:itemId', getAuthor, async (req: any, res: any) => {
   try {
     const { author } = req;
     const { itemId } = req.params;
@@ -364,7 +365,7 @@ adminRouter.delete('/:slug/knowledge/:itemId', getAuthor, async (req: any, res) 
 
 // GET /admin/:slug/stats/messages
 // Get daily user message statistics
-adminRouter.get('/:slug/stats/messages', getAuthor, async (req: any, res) => {
+adminRouter.get('/:slug/stats/messages', getAuthor, async (req: any, res: any) => {
   try {
     const { author } = req;
 
@@ -387,7 +388,7 @@ adminRouter.get('/:slug/stats/messages', getAuthor, async (req: any, res) => {
 
 // POST /admin/:slug/webhook/notify-bug
 // Send bug notification to PM via chat webhook
-adminRouter.post('/:slug/webhook/notify-bug', getAuthor, async (req: any, res) => {
+adminRouter.post('/:slug/webhook/notify-bug', getAuthor, async (req: any, res: any) => {
   try {
     const { author } = req;
     const { title, content, category } = req.body;
@@ -423,7 +424,7 @@ adminRouter.post('/:slug/webhook/notify-bug', getAuthor, async (req: any, res) =
 
 // POST /admin/transcribe
 // Transcribe audio to text using Whisper
-adminRouter.post('/transcribe', upload.single('audio'), async (req: any, res) => {
+adminRouter.post('/transcribe', upload.single('audio'), async (req: any, res: any) => {
   try {
     if (!req.file) {
       return res.status(400).json({ error: 'No audio file provided' });

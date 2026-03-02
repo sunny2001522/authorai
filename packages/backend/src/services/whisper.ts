@@ -1,5 +1,4 @@
 import OpenAI from 'openai';
-import { Readable } from 'stream';
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
@@ -11,7 +10,8 @@ export async function transcribeAudio(audioBuffer: Buffer, mimeType: string = 'a
   }
 
   // Convert buffer to a File-like object for OpenAI
-  const file = new File([audioBuffer], 'audio.webm', { type: mimeType });
+  const uint8Array = new Uint8Array(audioBuffer);
+  const file = new File([uint8Array], 'audio.webm', { type: mimeType });
 
   const transcription = await openai.audio.transcriptions.create({
     file: file,

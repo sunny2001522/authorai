@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { Router } from 'express';
 import { nanoid } from 'nanoid';
 import {
@@ -18,7 +19,7 @@ export const chatRouter = Router();
 
 // POST /chat/:authorSlug/message
 // Send a message to the AI
-chatRouter.post('/:authorSlug/message', async (req, res) => {
+chatRouter.post('/:authorSlug/message', async (req: any, res: any) => {
   try {
     const { authorSlug } = req.params;
     const { sessionId, content } = req.body;
@@ -250,7 +251,7 @@ ${knowledgeContent}
 
 // GET /chat/:authorSlug/history/:sessionId
 // Get conversation history
-chatRouter.get('/:authorSlug/history/:sessionId', async (req, res) => {
+chatRouter.get('/:authorSlug/history/:sessionId', async (req: any, res: any) => {
   try {
     const { authorSlug, sessionId } = req.params;
 
@@ -282,7 +283,7 @@ chatRouter.get('/:authorSlug/history/:sessionId', async (req, res) => {
 
 // POST /chat/:authorSlug/session
 // Create a new session
-chatRouter.post('/:authorSlug/session', async (req, res) => {
+chatRouter.post('/:authorSlug/session', async (req: any, res: any) => {
   try {
     const { authorSlug } = req.params;
 
@@ -307,7 +308,7 @@ chatRouter.post('/:authorSlug/session', async (req, res) => {
 
 // GET /chat/:authorSlug/poll/:sessionId
 // Poll for new admin messages (used by chat widget)
-chatRouter.get('/:authorSlug/poll/:sessionId', async (req, res) => {
+chatRouter.get('/:authorSlug/poll/:sessionId', async (req: any, res: any) => {
   try {
     const { authorSlug, sessionId } = req.params;
     const { lastMessageId } = req.query;
