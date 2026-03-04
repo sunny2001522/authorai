@@ -37,6 +37,7 @@ export interface Message {
   role: 'user' | 'assistant';
   content: string;
   isAdminReply?: boolean;
+  isRecalled?: boolean;
   linkText?: string;
   linkUrl?: string;
   created_at: string;
@@ -98,6 +99,22 @@ export async function sendAdminReply(
   return response.json();
 }
 
+// 收回管理員訊息
+export async function recallAdminMessage(
+  slug: string,
+  messageId: string
+): Promise<{ success: boolean }> {
+  const response = await fetch(
+    `${API_BASE}/admin/${slug}/messages/${messageId}/recall`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+    }
+  );
+  if (!response.ok) throw new Error('Failed to recall message');
+  return response.json();
+}
+
 // ============ Knowledge ============
 
 export interface KnowledgeItem {
@@ -136,6 +153,32 @@ export interface AddKnowledgeParams {
   linkText?: string;
   linkUrl?: string;
   isShared?: boolean;  // true = 共用知識 (author_id = null)
+}
+
+// AI 處理後的知識項目
+export interface ProcessedKnowledgeItem {
+  title: string;
+  content: string;
+  category: string;
+  sub_category?: string;
+}
+
+// AI 智能處理知識內容
+export async function processKnowledgeWithAI(
+  slug: string,
+  content: string
+): Promise<{
+  success: boolean;
+  shouldSplit: boolean;
+  items: ProcessedKnowledgeItem[];
+}> {
+  const response = await fetch(`${API_BASE}/admin/${slug}/knowledge/process`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ content }),
+  });
+  if (!response.ok) throw new Error('AI processing failed');
+  return response.json();
 }
 
 export async function addTextKnowledge(
@@ -199,7 +242,7 @@ export async function deleteKnowledge(
 
 // ============ Transcription ============
 
-export async function transcribeAudio(audioBlob: Blob): Promise<{ text: string }> {
+export async function transcribeAudio(audioBlob: Blob): Promise<{ text: string; success: boolean }> {
   const formData = new FormData();
   formData.append('audio', audioBlob, 'audio.webm');
 

@@ -1,6 +1,6 @@
-import { useState, useEffect } from 'react';
-import { X, Plus, Link as LinkIcon } from 'lucide-react';
-import { addTextKnowledge, getCategories } from '../../services/api';
+import { useState, useEffect, useCallback } from 'react';
+import { X, Plus, Link as LinkIcon, Sparkles, Loader2 } from 'lucide-react';
+import { addTextKnowledge, getCategories, processKnowledgeWithAI } from '../../services/api';
 
 interface TextInputModalProps {
   adminKey: string;
@@ -70,20 +70,26 @@ function EditableSelect({
 }
 
 export function TextInputModal({ adminKey, onClose, onSaved }: TextInputModalProps) {
-  const [title, setTitle] = useState('');
-  const [content, setContent] = useState('');
-  const [category, setCategory] = useState('');
-  const [subcategory1, setSubcategory1] = useState('');
-  const [subcategory2, setSubcategory2] = useState('');
-  const [subcategory3, setSubcategory3] = useState('');
-  const [linkText, setLinkText] = useState('');
-  const [linkUrl, setLinkUrl] = useState('');
-  const [isShared, setIsShared] = useState(false);  // 是否為共用知識
+  // 原始輸入
+  const [rawContent, setRawContent] = useState('');
 
+  // AI 處理狀態
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [aiProcessed, setAiProcessed] = useState(false);
+
+  // 編輯狀態（單個項目或多個項目）
+  const [editingItems, setEditingItems] = useState<Array<{
+    title: string;
+    content: string;
+    category: string;
+    subcategory1: string;
+    linkText: string;
+    linkUrl: string;
+  }>>([]);
+
+  const [isShared, setIsShared] = useState(false);
   const [categories, setCategories] = useState<string[]>([]);
   const [subcategory1Map, setSubcategory1Map] = useState<Record<string, string[]>>({});
-  const [subcategory2Map, setSubcategory2Map] = useState<Record<string, string[]>>({});
-  const [subcategory3Map, setSubcategory3Map] = useState<Record<string, string[]>>({});
 
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -95,8 +101,6 @@ export function TextInputModal({ adminKey, onClose, onSaved }: TextInputModalPro
         const data = await getCategories(adminKey);
         setCategories(data.categories);
         setSubcategory1Map(data.subcategory1Map);
-        setSubcategory2Map(data.subcategory2Map);
-        setSubcategory3Map(data.subcategory3Map);
       } catch (err) {
         console.error('Failed to load categories:', err);
       }
@@ -104,31 +108,86 @@ export function TextInputModal({ adminKey, onClose, onSaved }: TextInputModalPro
     loadCategories();
   }, [adminKey]);
 
-  // 取得子分類選項
-  const getSubcategory1Options = () => subcategory1Map[category] || [];
-  const getSubcategory2Options = () => subcategory2Map[`${category}|${subcategory1}`] || [];
-  const getSubcategory3Options = () => subcategory3Map[`${category}|${subcategory1}|${subcategory2}`] || [];
+  // AI 處理內容
+  const handleAIProcess = useCallback(async () => {
+    if (!rawContent.trim()) return;
 
+    setIsProcessing(true);
+    setError(null);
+
+    try {
+      const result = await processKnowledgeWithAI(adminKey, rawContent);
+
+      if (result.success && result.items.length > 0) {
+        setEditingItems(result.items.map(item => ({
+          title: item.title,
+          content: item.content,
+          category: item.category,
+          subcategory1: item.sub_category || '',
+          linkText: '',
+          linkUrl: '',
+        })));
+        setAiProcessed(true);
+      }
+    } catch (err) {
+      console.error('AI processing failed:', err);
+      setError('AI 處理失敗，請手動填寫');
+    } finally {
+      setIsProcessing(false);
+    }
+  }, [adminKey, rawContent]);
+
+  // 輸入後自動觸發 AI 處理（防抖）
+  useEffect(() => {
+    if (!rawContent.trim() || aiProcessed) return;
+
+    const timer = setTimeout(() => {
+      if (rawContent.trim().length >= 10) {
+        handleAIProcess();
+      }
+    }, 1500); // 1.5秒後自動處理
+
+    return () => clearTimeout(timer);
+  }, [rawContent, aiProcessed, handleAIProcess]);
+
+  // 更新單個項目
+  const updateItem = (index: number, field: string, value: string) => {
+    setEditingItems(prev => prev.map((item, i) =>
+      i === index ? { ...item, [field]: value } : item
+    ));
+  };
+
+  // 刪除項目
+  const removeItem = (index: number) => {
+    setEditingItems(prev => prev.filter((_, i) => i !== index));
+  };
+
+  // 儲存所有項目
   const handleSave = async () => {
-    if (!title.trim() || !content.trim()) {
-      setError('請填寫標題和內容');
+    const validItems = editingItems.filter(item => item.title.trim() && item.content.trim());
+
+    if (validItems.length === 0) {
+      setError('請至少填寫一筆有效的知識');
       return;
     }
 
     try {
       setSaving(true);
       setError(null);
-      await addTextKnowledge(adminKey, {
-        title: title.trim(),
-        content: content.trim(),
-        category: category || undefined,
-        subcategory1: subcategory1 || undefined,
-        subcategory2: subcategory2 || undefined,
-        subcategory3: subcategory3 || undefined,
-        linkText: linkText.trim() || undefined,
-        linkUrl: linkUrl.trim() || undefined,
-        isShared,
-      });
+
+      // 逐一儲存
+      for (const item of validItems) {
+        await addTextKnowledge(adminKey, {
+          title: item.title.trim(),
+          content: item.content.trim(),
+          category: item.category || undefined,
+          subcategory1: item.subcategory1 || undefined,
+          linkText: item.linkText.trim() || undefined,
+          linkUrl: item.linkUrl.trim() || undefined,
+          isShared,
+        });
+      }
+
       onSaved();
     } catch (err) {
       setError('儲存失敗，請稍後再試');
@@ -136,6 +195,12 @@ export function TextInputModal({ adminKey, onClose, onSaved }: TextInputModalPro
     } finally {
       setSaving(false);
     }
+  };
+
+  // 重置，重新輸入
+  const handleReset = () => {
+    setAiProcessed(false);
+    setEditingItems([]);
   };
 
   return (
@@ -147,10 +212,13 @@ export function TextInputModal({ adminKey, onClose, onSaved }: TextInputModalPro
       />
 
       {/* Modal */}
-      <div className="relative bg-dark-card border border-white/10 rounded-2xl w-full max-w-3xl max-h-[90vh] overflow-hidden">
+      <div className="relative bg-dark-card border border-white/10 rounded-2xl w-full max-w-4xl max-h-[90vh] overflow-hidden">
         {/* Header */}
         <div className="flex items-center justify-between p-4 border-b border-white/10">
-          <h3 className="text-lg font-semibold text-white">新增知識 - 文字輸入</h3>
+          <div className="flex items-center gap-2">
+            <Sparkles className="w-5 h-5 text-[#b20a2c]" />
+            <h3 className="text-lg font-semibold text-white">AI 智能新增知識</h3>
+          </div>
           <button
             onClick={onClose}
             className="p-2 rounded-lg hover:bg-white/10 transition-colors"
@@ -160,139 +228,177 @@ export function TextInputModal({ adminKey, onClose, onSaved }: TextInputModalPro
         </div>
 
         {/* Content */}
-        <div className="p-6 space-y-4 max-h-[60vh] overflow-y-auto">
-          {/* 歸屬選擇 */}
-          <div>
-            <label className="block text-sm font-medium text-gray-300 mb-2">
-              歸屬
-            </label>
-            <div className="flex gap-4">
-              <label className="flex items-center gap-2 cursor-pointer">
-                <input
-                  type="radio"
-                  name="ownership"
-                  checked={!isShared}
-                  onChange={() => setIsShared(false)}
-                  className="w-4 h-4 text-[#b20a2c] bg-dark-card border-gray-600 focus:ring-[#b20a2c]"
+        <div className="p-6 max-h-[70vh] overflow-y-auto">
+          {!aiProcessed ? (
+            // 步驟 1：輸入原始內容
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-300 mb-2">
+                  輸入知識內容
+                  <span className="text-gray-500 font-normal ml-2">
+                    （AI 將自動整理標題、分類，並判斷是否需要拆分）
+                  </span>
+                </label>
+                <textarea
+                  value={rawContent}
+                  onChange={(e) => setRawContent(e.target.value)}
+                  placeholder="直接貼上或輸入你的知識內容，AI 會自動幫你整理...&#10;&#10;例如：&#10;Q: 如何報名體驗課？&#10;A: 可以點擊下方連結報名，體驗課完全免費..."
+                  rows={12}
+                  className="textarea w-full"
+                  disabled={isProcessing}
                 />
-                <span className="text-white">老師專屬</span>
-              </label>
-              <label className="flex items-center gap-2 cursor-pointer">
-                <input
-                  type="radio"
-                  name="ownership"
-                  checked={isShared}
-                  onChange={() => setIsShared(true)}
-                  className="w-4 h-4 text-gray-500 bg-dark-card border-gray-600 focus:ring-gray-500"
-                />
-                <span className="text-white">共用知識</span>
-                <span className="text-xs text-gray-500">（所有老師都可見）</span>
-              </label>
-            </div>
-          </div>
+              </div>
 
-          {/* 分類 - 四層 */}
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-300 mb-2">
-                類別
-              </label>
-              <EditableSelect
-                value={category}
-                options={categories}
-                placeholder="選擇或新增類別"
-                onChange={setCategory}
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-300 mb-2">
-                子類別 1
-              </label>
-              <EditableSelect
-                value={subcategory1}
-                options={getSubcategory1Options()}
-                placeholder="選擇或新增"
-                onChange={setSubcategory1}
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-300 mb-2">
-                子類別 2
-              </label>
-              <EditableSelect
-                value={subcategory2}
-                options={getSubcategory2Options()}
-                placeholder="選擇或新增"
-                onChange={setSubcategory2}
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-300 mb-2">
-                子類別 3
-              </label>
-              <EditableSelect
-                value={subcategory3}
-                options={getSubcategory3Options()}
-                placeholder="選擇或新增"
-                onChange={setSubcategory3}
-              />
-            </div>
-          </div>
+              {isProcessing && (
+                <div className="flex items-center justify-center gap-2 py-4 text-[#b20a2c]">
+                  <Loader2 className="w-5 h-5 animate-spin" />
+                  <span>AI 正在分析整理中...</span>
+                </div>
+              )}
 
-          {/* 標題 */}
-          <div>
-            <label className="block text-sm font-medium text-gray-300 mb-2">
-              標題（問題）
-            </label>
-            <input
-              type="text"
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              placeholder="例：如何報名體驗課？"
-              className="input w-full"
-            />
-          </div>
+              {/* 歸屬選擇 */}
+              <div>
+                <label className="block text-sm font-medium text-gray-300 mb-2">
+                  歸屬
+                </label>
+                <div className="flex gap-4">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="radio"
+                      name="ownership"
+                      checked={!isShared}
+                      onChange={() => setIsShared(false)}
+                      className="w-4 h-4 text-[#b20a2c] bg-dark-card border-gray-600 focus:ring-[#b20a2c]"
+                    />
+                    <span className="text-white">老師專屬</span>
+                  </label>
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="radio"
+                      name="ownership"
+                      checked={isShared}
+                      onChange={() => setIsShared(true)}
+                      className="w-4 h-4 text-gray-500 bg-dark-card border-gray-600 focus:ring-gray-500"
+                    />
+                    <span className="text-white">共用知識</span>
+                    <span className="text-xs text-gray-500">（所有老師都可見）</span>
+                  </label>
+                </div>
+              </div>
 
-          {/* 內容 */}
-          <div>
-            <label className="block text-sm font-medium text-gray-300 mb-2">
-              內容（回答）
-            </label>
-            <textarea
-              value={content}
-              onChange={(e) => setContent(e.target.value)}
-              placeholder="輸入回答內容..."
-              rows={8}
-              className="textarea w-full"
-            />
-          </div>
-
-          {/* 連結 */}
-          <div>
-            <label className="block text-sm font-medium text-gray-300 mb-2">
-              連結按鈕（可選）
-            </label>
-            <div className="flex gap-2 items-center">
-              <LinkIcon className="w-4 h-4 text-gray-500 flex-shrink-0" />
-              <input
-                type="text"
-                value={linkText}
-                onChange={(e) => setLinkText(e.target.value)}
-                placeholder="按鈕文字"
-                className="input flex-1"
-              />
-              <input
-                type="url"
-                value={linkUrl}
-                onChange={(e) => setLinkUrl(e.target.value)}
-                placeholder="https://..."
-                className="input flex-[2]"
-              />
+              {error && (
+                <p className="text-red-400 text-sm">{error}</p>
+              )}
             </div>
-          </div>
+          ) : (
+            // 步驟 2：顯示 AI 處理結果
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <p className="text-gray-300">
+                  AI 整理完成，共 <span className="text-[#b20a2c] font-semibold">{editingItems.length}</span> 筆知識
+                </p>
+                <button
+                  onClick={handleReset}
+                  className="text-sm text-gray-400 hover:text-white"
+                >
+                  重新輸入
+                </button>
+              </div>
 
-          {error && (
-            <p className="text-red-400 text-sm">{error}</p>
+              {/* 顯示每個整理後的項目 */}
+              <div className="space-y-4">
+                {editingItems.map((item, index) => (
+                  <div
+                    key={index}
+                    className="p-4 bg-white/5 border border-white/10 rounded-xl space-y-3"
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <span className="px-2 py-0.5 bg-[#b20a2c]/20 text-[#b20a2c] text-xs rounded">
+                        #{index + 1}
+                      </span>
+                      {editingItems.length > 1 && (
+                        <button
+                          onClick={() => removeItem(index)}
+                          className="text-gray-400 hover:text-red-400 text-xs"
+                        >
+                          移除
+                        </button>
+                      )}
+                    </div>
+
+                    {/* 分類 */}
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-xs text-gray-400 mb-1">分類</label>
+                        <EditableSelect
+                          value={item.category}
+                          options={categories}
+                          placeholder="選擇分類"
+                          onChange={(v) => updateItem(index, 'category', v)}
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs text-gray-400 mb-1">子分類</label>
+                        <EditableSelect
+                          value={item.subcategory1}
+                          options={subcategory1Map[item.category] || []}
+                          placeholder="選擇子分類"
+                          onChange={(v) => updateItem(index, 'subcategory1', v)}
+                        />
+                      </div>
+                    </div>
+
+                    {/* 標題 */}
+                    <div>
+                      <label className="block text-xs text-gray-400 mb-1">標題</label>
+                      <input
+                        type="text"
+                        value={item.title}
+                        onChange={(e) => updateItem(index, 'title', e.target.value)}
+                        className="input w-full"
+                      />
+                    </div>
+
+                    {/* 內容 */}
+                    <div>
+                      <label className="block text-xs text-gray-400 mb-1">內容</label>
+                      <textarea
+                        value={item.content}
+                        onChange={(e) => updateItem(index, 'content', e.target.value)}
+                        rows={3}
+                        className="textarea w-full"
+                      />
+                    </div>
+
+                    {/* 連結 */}
+                    <div>
+                      <label className="block text-xs text-gray-400 mb-1">連結按鈕（可選）</label>
+                      <div className="flex gap-2 items-center">
+                        <LinkIcon className="w-4 h-4 text-gray-500 flex-shrink-0" />
+                        <input
+                          type="text"
+                          value={item.linkText}
+                          onChange={(e) => updateItem(index, 'linkText', e.target.value)}
+                          placeholder="按鈕文字"
+                          className="input flex-1"
+                        />
+                        <input
+                          type="url"
+                          value={item.linkUrl}
+                          onChange={(e) => updateItem(index, 'linkUrl', e.target.value)}
+                          placeholder="https://..."
+                          className="input flex-[2]"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              {error && (
+                <p className="text-red-400 text-sm">{error}</p>
+              )}
+            </div>
           )}
         </div>
 
@@ -301,13 +407,33 @@ export function TextInputModal({ adminKey, onClose, onSaved }: TextInputModalPro
           <button onClick={onClose} className="btn-secondary">
             取消
           </button>
-          <button
-            onClick={handleSave}
-            disabled={saving || !title.trim() || !content.trim()}
-            className="btn-primary disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            {saving ? '儲存中...' : '儲存到知識庫'}
-          </button>
+          {!aiProcessed ? (
+            <button
+              onClick={handleAIProcess}
+              disabled={isProcessing || !rawContent.trim()}
+              className="btn-primary disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+            >
+              {isProcessing ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  處理中...
+                </>
+              ) : (
+                <>
+                  <Sparkles className="w-4 h-4" />
+                  AI 整理
+                </>
+              )}
+            </button>
+          ) : (
+            <button
+              onClick={handleSave}
+              disabled={saving || editingItems.length === 0}
+              className="btn-primary disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {saving ? '儲存中...' : `儲存 ${editingItems.length} 筆知識`}
+            </button>
+          )}
         </div>
       </div>
     </div>

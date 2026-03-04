@@ -11,6 +11,7 @@ import {
   deleteConversation,
   notifyBugToWebhook,
   sendAdminReply,
+  recallAdminMessage,
   Conversation,
   Message,
   KnowledgeItem,
@@ -34,10 +35,10 @@ import {
   TrendingUp,
   Calendar,
   ChevronDown,
-  ExternalLink,
   Send,
   Link as LinkIcon,
   X,
+  Undo2,
 } from "lucide-react";
 import { formatDistanceToNow, format } from "date-fns";
 import { zhTW } from "date-fns/locale";
@@ -119,6 +120,7 @@ function ConversationsView({
   const [showLinkPopover, setShowLinkPopover] = useState(false);
   const [linkText, setLinkText] = useState('');
   const [linkUrl, setLinkUrl] = useState('');
+  const [isComposing, setIsComposing] = useState(false); // IME 中文輸入狀態
 
   useEffect(() => {
     loadConversations();
@@ -227,7 +229,8 @@ function ConversationsView({
       }, 100);
     } catch (err) {
       console.error('Failed to send reply:', err);
-      alert('發送失敗，請稍後再試');
+      const errorMessage = err instanceof Error ? err.message : '未知錯誤';
+      alert(`發送失敗：${errorMessage}`);
     } finally {
       setSending(false);
     }
@@ -237,6 +240,22 @@ function ConversationsView({
   const handleInsertLink = () => {
     if (linkText && linkUrl) {
       setShowLinkPopover(false);
+    }
+  };
+
+  // 收回訊息
+  const handleRecallMessage = async (messageId: string) => {
+    if (!confirm('確定要收回這則訊息嗎？用戶將無法再看到此訊息。')) return;
+
+    try {
+      await recallAdminMessage(slug, messageId);
+      // 重新載入訊息
+      if (selectedConv) {
+        await loadMessages(selectedConv);
+      }
+    } catch (err) {
+      console.error('Failed to recall message:', err);
+      alert('收回訊息失敗');
     }
   };
 
@@ -285,17 +304,32 @@ function ConversationsView({
                     <div className={`max-w-[80%] ${msg.role === "assistant" ? "text-right" : ""}`}>
                       <div
                         className={`inline-block px-4 py-3 rounded-2xl ${
-                          msg.role === "user"
-                            ? "bg-blue-50 text-gray-800 rounded-bl-md"
-                            : "bg-[#b20a2c] text-white rounded-br-md"
+                          msg.isRecalled
+                            ? "bg-gray-200 text-gray-500 rounded-br-md"
+                            : msg.role === "user"
+                              ? "bg-blue-50 text-gray-800 rounded-bl-md"
+                              : "bg-[#b20a2c] text-white rounded-br-md"
                         }`}
                       >
-                        <p className="whitespace-pre-wrap text-[15px] leading-relaxed text-left">
+                        <p className={`whitespace-pre-wrap text-[15px] leading-relaxed text-left ${msg.isRecalled ? "text-gray-500" : ""}`}>
                           {msg.content}
                         </p>
+                        {msg.isRecalled && (
+                          <p className="text-xs mt-1 text-gray-400 text-left">（已收回）</p>
+                        )}
                       </div>
-                      {/* 連結按鈕 */}
-                      {msg.linkUrl && (
+                      {/* 收回按鈕 - 只有管理員回覆且未收回才顯示 */}
+                      {msg.isAdminReply && !msg.isRecalled && (
+                        <button
+                          onClick={() => handleRecallMessage(msg.id)}
+                          className="ml-2 p-1.5 text-gray-400 hover:text-red-500 rounded-lg"
+                          title="收回訊息"
+                        >
+                          <Undo2 size={14} />
+                        </button>
+                      )}
+                      {/* 連結按鈕 - 已收回的訊息不顯示連結 */}
+                      {msg.linkUrl && !msg.isRecalled && (
                         <div className={`mt-2 ${msg.role === "assistant" ? "text-right" : ""}`}>
                           <a
                             href={msg.linkUrl}
@@ -331,8 +365,10 @@ function ConversationsView({
                   placeholder="回覆學員..."
                   rows={1}
                   className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 text-gray-800 placeholder-gray-400 resize-none focus:outline-none focus:border-[#b20a2c]/50 text-sm"
+                  onCompositionStart={() => setIsComposing(true)}
+                  onCompositionEnd={() => setIsComposing(false)}
                   onKeyDown={(e) => {
-                    if (e.key === 'Enter' && !e.shiftKey) {
+                    if (e.key === 'Enter' && !e.shiftKey && !isComposing) {
                       e.preventDefault();
                       handleSendReply();
                     }
@@ -562,23 +598,42 @@ function ConversationsView({
                           <Bot size={16} className="text-white" />
                         )}
                       </div>
-                      <div className={`max-w-[80%] ${msg.role === "assistant" ? "text-right" : ""}`}>
+                      <div className={`max-w-[80%] ${msg.role === "assistant" ? "text-right" : ""} group/msg`}>
                         <div
                           className={`inline-block px-4 py-3 rounded-2xl ${
-                            msg.role === "user"
-                              ? "bg-blue-50 text-gray-800 rounded-bl-md"
-                              : "bg-[#b20a2c] text-white rounded-br-md"
+                            msg.isRecalled
+                              ? "bg-gray-200 text-gray-500 rounded-br-md"
+                              : msg.role === "user"
+                                ? "bg-blue-50 text-gray-800 rounded-bl-md"
+                                : "bg-[#b20a2c] text-white rounded-br-md"
                           }`}
                         >
-                          <p className="whitespace-pre-wrap text-[15px] leading-relaxed text-left">
+                          <p className={`whitespace-pre-wrap text-[15px] leading-relaxed text-left ${msg.isRecalled ? "text-gray-500" : ""}`}>
                             {msg.content}
                           </p>
-                          <p className={`text-xs mt-1 ${msg.role === "user" ? "text-gray-400" : "text-red-200"} text-left`}>
+                          <p className={`text-xs mt-1 text-left ${
+                            msg.isRecalled
+                              ? "text-gray-400"
+                              : msg.role === "user"
+                                ? "text-gray-400"
+                                : "text-red-200"
+                          }`}>
                             {format(new Date(msg.created_at), "HH:mm", { locale: zhTW })}
+                            {msg.isRecalled && <span className="ml-2">（已收回）</span>}
                           </p>
                         </div>
-                        {/* 連結按鈕 */}
-                        {msg.linkUrl && (
+                        {/* 收回按鈕 - 只有管理員回覆且未收回才顯示 */}
+                        {msg.isAdminReply && !msg.isRecalled && (
+                          <button
+                            onClick={() => handleRecallMessage(msg.id)}
+                            className="ml-2 p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-lg opacity-0 group-hover/msg:opacity-100 transition-all"
+                            title="收回訊息"
+                          >
+                            <Undo2 size={14} />
+                          </button>
+                        )}
+                        {/* 連結按鈕 - 已收回的訊息不顯示連結 */}
+                        {msg.linkUrl && !msg.isRecalled && (
                           <div className={`mt-2 ${msg.role === "assistant" ? "text-right" : ""}`}>
                             <a
                               href={msg.linkUrl}
@@ -615,8 +670,10 @@ function ConversationsView({
                     placeholder="輸入要回覆給學員的訊息..."
                     rows={2}
                     className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-gray-800 placeholder-gray-400 resize-none focus:outline-none focus:border-[#b20a2c]/50 focus:ring-1 focus:ring-[#b20a2c]/20"
+                    onCompositionStart={() => setIsComposing(true)}
+                    onCompositionEnd={() => setIsComposing(false)}
                     onKeyDown={(e) => {
-                      if (e.key === 'Enter' && !e.shiftKey) {
+                      if (e.key === 'Enter' && !e.shiftKey && !isComposing) {
                         e.preventDefault();
                         handleSendReply();
                       }

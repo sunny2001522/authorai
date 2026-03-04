@@ -15,8 +15,10 @@ import {
   getTotalUserMessageCount,
   getConversationById,
   addAdminMessage,
+  recallAdminMessage,
 } from '../services/supabase';
 import { transcribeAudio } from '../services/whisper';
+import { processKnowledgeContent } from '../services/gemini';
 
 export const adminRouter = Router();
 
@@ -117,7 +119,8 @@ adminRouter.get('/:slug/conversations/:convId', getAuthor, async (req: any, res:
     const { author } = req;
     const { convId } = req.params;
 
-    const messages = await getConversationMessages(author.id, convId);
+    // 管理員可以看到所有訊息，包含已收回的
+    const messages = await getConversationMessages(author.id, convId, { includeRecalled: true });
 
     res.json({
       id: convId,
@@ -126,6 +129,7 @@ adminRouter.get('/:slug/conversations/:convId', getAuthor, async (req: any, res:
         role: m.role,
         content: m.content,
         isAdminReply: m.is_admin_reply || false,
+        isRecalled: m.is_recalled || false,
         linkText: m.link_text,
         linkUrl: m.link_url,
         created_at: m.created_at,
@@ -190,6 +194,26 @@ adminRouter.delete('/:slug/conversations/:convId', getAuthor, async (req: any, r
     res.json({ success: true });
   } catch (error) {
     console.error('Error deleting conversation:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// POST /admin/:slug/messages/:messageId/recall
+// Recall (soft delete) an admin message
+adminRouter.post('/:slug/messages/:messageId/recall', getAuthor, async (req: any, res: any) => {
+  try {
+    const { author } = req;
+    const { messageId } = req.params;
+
+    const success = await recallAdminMessage(author.id, messageId);
+
+    if (!success) {
+      return res.status(404).json({ error: 'Message not found or not an admin reply' });
+    }
+
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Error recalling message:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
@@ -284,6 +308,32 @@ adminRouter.get('/:slug/knowledge/categories', getAuthor, async (req: any, res: 
   } catch (error) {
     console.error('Error getting categories:', error);
     res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// POST /admin/:slug/knowledge/text
+// POST /admin/:slug/knowledge/process
+// AI 智能處理知識內容（分析、整理、分類）
+adminRouter.post('/:slug/knowledge/process', getAuthor, async (req: any, res: any) => {
+  try {
+    const { content } = req.body;
+
+    if (!content || !content.trim()) {
+      return res.status(400).json({ error: 'Missing content' });
+    }
+
+    console.log('Processing knowledge content with AI...');
+    const result = await processKnowledgeContent(content.trim());
+    console.log('AI processing result:', result);
+
+    res.json({
+      success: true,
+      shouldSplit: result.shouldSplit,
+      items: result.items,
+    });
+  } catch (error) {
+    console.error('Error processing knowledge:', error);
+    res.status(500).json({ error: 'AI processing failed' });
   }
 });
 

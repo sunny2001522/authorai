@@ -218,15 +218,22 @@ export async function addMessage(
 
 export async function getConversationMessages(
   authorId: string,
-  conversationId: string
+  conversationId: string,
+  options?: { includeRecalled?: boolean }
 ): Promise<Message[]> {
   const client = getSupabase();
 
-  const { data, error } = await client
+  let query = client
     .from('messages')
     .select('*')
-    .eq('conversation_id', conversationId)
-    .order('created_at', { ascending: true });
+    .eq('conversation_id', conversationId);
+
+  // 預設過濾已收回的訊息，除非明確要求包含
+  if (!options?.includeRecalled) {
+    query = query.or('is_recalled.is.null,is_recalled.eq.false');
+  }
+
+  const { data, error } = await query.order('created_at', { ascending: true });
 
   if (error || !data) return [];
   return data as Message[];
@@ -571,7 +578,10 @@ export async function addAdminMessage(
     .select()
     .single();
 
-  if (error || !data) throw new Error('Failed to add admin message');
+  if (error || !data) {
+    console.error('Supabase insert error:', error);
+    throw new Error(`Failed to add admin message: ${error?.message || 'Unknown error'}`);
+  }
 
   // 更新對話的 message_count 和 last_message_at
   const { data: conv } = await client
@@ -592,7 +602,62 @@ export async function addAdminMessage(
 }
 
 /**
+ * 收回管理員訊息（軟刪除）
+ */
+export async function recallAdminMessage(
+  authorId: string,
+  messageId: string
+): Promise<boolean> {
+  const client = getSupabase();
+
+  // 先驗證訊息存在且是管理員回覆
+  const { data: message, error: msgError } = await client
+    .from('messages')
+    .select('id, conversation_id, is_admin_reply')
+    .eq('id', messageId)
+    .single();
+
+  console.log('Recall message lookup:', { messageId, message, msgError });
+
+  if (!message) {
+    console.log('Message not found');
+    return false;
+  }
+
+  // 檢查是否是管理員回覆（允許 true 或 null 都可以收回，只要是 assistant 角色）
+  if (message.is_admin_reply !== true) {
+    console.log('Not an admin reply, is_admin_reply:', message.is_admin_reply);
+    return false;
+  }
+
+  // 驗證對話屬於該作者
+  const { data: conv, error: convError } = await client
+    .from('conversations')
+    .select('author_id')
+    .eq('id', message.conversation_id)
+    .single();
+
+  console.log('Conversation lookup:', { conv, convError, authorId });
+
+  if (!conv || conv.author_id !== authorId) {
+    console.log('Conversation not found or author mismatch');
+    return false;
+  }
+
+  // 標記為已收回
+  const { error } = await client
+    .from('messages')
+    .update({ is_recalled: true })
+    .eq('id', messageId);
+
+  console.log('Update result:', { error });
+
+  return !error;
+}
+
+/**
  * 取得未讀的管理員訊息（用於輪詢）
+ * 自動過濾已收回的訊息
  */
 export async function getUnreadAdminMessages(
   conversationId: string,
@@ -606,6 +671,7 @@ export async function getUnreadAdminMessages(
     .eq('conversation_id', conversationId)
     .eq('is_admin_reply', true)
     .is('read_at', null)
+    .or('is_recalled.is.null,is_recalled.eq.false')
     .order('created_at', { ascending: true });
 
   if (afterMessageId) {
