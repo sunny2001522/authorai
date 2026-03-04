@@ -31,7 +31,7 @@ export async function generateResponse(params: GenerateResponseParams): Promise<
     systemPrompt,
     messages,
     temperature = 0.5,
-    maxTokens = 50,  // 嚴格限制 token 數量
+    maxTokens = 150,  // 放寬 token 限制，讓回答更自然
   } = params;
 
   const model = getGenAI().getGenerativeModel({

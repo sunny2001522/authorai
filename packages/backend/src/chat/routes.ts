@@ -89,31 +89,36 @@ chatRouter.post('/:authorSlug/message', async (req: any, res: any) => {
     let aiResponse: string;
 
     if (relevantKnowledge.length > 0 && relevantKnowledge[0].content) {
-      // 有匹配到知識庫，讓 AI 基於知識庫內容用親切語氣回答
-      const knowledgeContent = relevantKnowledge[0].content;
-      const hasLink = relevantKnowledge[0].link_text && relevantKnowledge[0].link_url;
+      // 有匹配到知識庫，讓 AI 基於多筆知識庫內容回答
+      // 整合前 3 筆相關知識
+      const knowledgeContents = relevantKnowledge
+        .slice(0, 3)
+        .map((k, i) => `【資料${i + 1}】${k.title}\n${k.content}`)
+        .join('\n\n');
+      const hasLink = relevantKnowledge.some(k => k.link_text && k.link_url);
 
       const enhancedPrompt = `你是恩如老師的 AI 助理「恩寶」，根據參考資料回答問題。
 
 【參考資料】
-${knowledgeContent}
+${knowledgeContents}
 
 【你的人設】
 - 你是恩如老師團隊的一員，熱情友善
 - 說話像朋友聊天，親切自然
 
 【回答規則】
-1. 根據參考資料回答，用自己的話重新表達
-2. 用口語化、輕鬆的方式傳達，不要照念
-3. 每次回答要稍微不同，避免重複
+1. 可以綜合多筆參考資料來回答，給出更完整的答案
+2. 用自己的話重新表達，像朋友聊天一樣自然
+3. 每次回答要有變化，不要重複相同句式
 4. 用「你」不要用「您」「學弟」「學妹」
-5. ${hasLink ? '可以說「點下方按鈕看更多」' : ''}
-6. 控制在 25-45 字
-7. 可以加一個表情符號
+5. ${hasLink ? '自然地提到「點下方按鈕可以看更多～」' : ''}
+6. 字數彈性：簡單問題 20-40 字，需要詳細說明可到 80 字
+7. 可以用 1-2 個表情符號讓對話更活潑
 
 【禁止事項】
-- 不要說「根據資料」「知識庫」等詞
-- 不要完全照抄參考資料`;
+- 不要說「根據資料」「知識庫」「參考」等詞
+- 不要完全照抄參考資料
+- 不要用制式回答`;
 
       aiResponse = await generateResponse({
         systemPrompt: enhancedPrompt,
@@ -144,9 +149,9 @@ ${knowledgeContent}
 5. 價格問題 → 「價格會依課程方案不同，點下方按鈕可以看詳細資訊喔！」
 
 【格式規則】
-- 控制在 25-40 字
-- 語氣輕鬆活潑
-- 可以用一個表情符號
+- 字數彈性：20-50 字都可以
+- 語氣輕鬆活潑，像朋友聊天
+- 可以用 1-2 個表情符號
 - 用「你」不要用「您」`;
 
       aiResponse = await generateResponse({
