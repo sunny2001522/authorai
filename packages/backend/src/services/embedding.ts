@@ -1,6 +1,6 @@
 /**
  * Embedding Service
- * 使用 Google Gemini text-embedding-005 生成向量
+ * 使用 Google Gemini gemini-embedding-001 生成向量 (768 維度)
  */
 import { GoogleGenerativeAI } from '@google/generative-ai';
 
@@ -20,14 +20,17 @@ function getGenAI(): GoogleGenerativeAI {
 
 /**
  * 生成文字的 embedding 向量
- * 使用 Gemini text-embedding-005 模型 (768 維度)
+ * 使用 Gemini gemini-embedding-001 模型，設定輸出 768 維度
  */
 export async function generateEmbedding(text: string): Promise<number[]> {
   const model = getGenAI().getGenerativeModel({
-    model: 'text-embedding-005',
+    model: 'gemini-embedding-001',
   });
 
-  const result = await model.embedContent(text);
+  const result = await model.embedContent({
+    content: { parts: [{ text }] },
+    outputDimensionality: 768,
+  });
   return result.embedding.values;
 }
 
@@ -43,12 +46,4 @@ export async function generateEmbeddings(texts: string[]): Promise<number[][]> {
   }
 
   return embeddings;
-}
-
-export interface KnowledgeSearchResult {
-  id: string;
-  title: string;
-  content: string;
-  category: string | null;
-  similarity: number;
 }

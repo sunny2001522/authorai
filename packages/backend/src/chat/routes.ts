@@ -66,9 +66,57 @@ chatRouter.post('/:authorSlug/message', async (req: any, res: any) => {
       relevantKnowledge = await searchKnowledge(
         author.id,
         queryEmbedding,
-        3,    // 取前 3 個結果
-        0.35  // 相似度閾值（降低以增加召回率）
+        5,    // 取前 5 個結果（多取一些以便重新排序）
+        0.35  // 相似度閾值
       );
+
+      // 3. 特殊意圖偵測：根據關鍵字優先排序相關知識
+
+      // 3a. 退費/退款偵測：優先找有客服連結的退費知識
+      const hasRefundKeyword = /退費|退款|退課|退錢|取消訂閱|不想要了/.test(content);
+      if (hasRefundKeyword && relevantKnowledge.length > 0) {
+        // 優先找「買錯了可以退嗎？」（有客服連結）
+        const refundWithLinkIndex = relevantKnowledge.findIndex(
+          k => k.title.includes('買錯') && k.link_url?.includes('line.me')
+        );
+        if (refundWithLinkIndex > 0) {
+          const refundKnowledge = relevantKnowledge[refundWithLinkIndex];
+          relevantKnowledge.splice(refundWithLinkIndex, 1);
+          relevantKnowledge.unshift(refundKnowledge);
+          console.log(`Refund query detected, prioritizing: "${refundKnowledge.title}"`);
+        } else {
+          // 退而求其次，找其他退費相關
+          const refundIndex = relevantKnowledge.findIndex(
+            k => k.title.includes('退') || k.content?.includes('退費')
+          );
+          if (refundIndex > 0) {
+            const refundKnowledge = relevantKnowledge[refundIndex];
+            relevantKnowledge.splice(refundIndex, 1);
+            relevantKnowledge.unshift(refundKnowledge);
+            console.log(`Refund query detected, prioritizing: "${refundKnowledge.title}"`);
+          }
+        }
+      }
+
+      // 3b. 股票代號偵測：如果查詢包含股票代號，優先使用「想要老師講特定的股票」
+      const hasStockCode = /\d{4,6}|[A-Z]{2,5}/i.test(content);
+      const hasStockKeyword = /股票|推薦|可以買|該買|能買|看好|分析|明牌/.test(content);
+
+      if ((hasStockCode || hasStockKeyword) && !hasRefundKeyword && relevantKnowledge.length > 0) {
+        const stockKnowledgeIndex = relevantKnowledge.findIndex(
+          k => k.title.includes('想要老師講特定的股票') || k.link_url?.includes('enbaoai')
+        );
+
+        if (stockKnowledgeIndex > 0) {
+          const stockKnowledge = relevantKnowledge[stockKnowledgeIndex];
+          relevantKnowledge.splice(stockKnowledgeIndex, 1);
+          relevantKnowledge.unshift(stockKnowledge);
+          console.log(`Stock query detected, prioritizing: "${stockKnowledge.title}"`);
+        }
+      }
+
+      // 只保留前 3 個
+      relevantKnowledge = relevantKnowledge.slice(0, 3);
 
       console.log(`Vector search found ${relevantKnowledge.length} results for query: "${content}"`);
       if (relevantKnowledge.length > 0) {
@@ -162,17 +210,51 @@ ${knowledgeContents}
       console.log(`Fallback answer: "${aiResponse}"`);
     }
 
-    // 收集相關知識的連結（使用第一個有連結的知識項目）
+    // 智慧連結匹配：根據 AI 回答內容決定要顯示哪個連結
     let linkText: string | undefined;
     let linkUrl: string | undefined;
-    for (const k of relevantKnowledge) {
-      console.log(`Checking knowledge "${k.title}" for link: link_text=${k.link_text}, link_url=${k.link_url}`);
-      if (k.link_text && k.link_url) {
-        linkText = k.link_text;
-        linkUrl = k.link_url;
-        console.log(`Found link: ${linkText} -> ${linkUrl}`);
-        break;  // 只取第一個有連結的
+
+    // 定義關鍵字與連結的對應關係
+    const linkKeywords = [
+      { keywords: ['客服', '聯絡', '進線', '諮詢'], linkContains: 'line.me' },
+      { keywords: ['恩寶AI', '恩寶', '個股', '股票分析'], linkContains: 'enbaoai' },
+      { keywords: ['報名', '課程'], linkContains: 'imoney889' },
+      { keywords: ['服務條款', '條款'], linkContains: 'tos.aspx' },
+      { keywords: ['訂閱', '續約'], linkContains: 'memberSubscription' },
+      { keywords: ['開戶', '口袋'], linkContains: 'pocket.tw' },
+    ];
+
+    // 先檢查 AI 回答中提到什麼，找對應的連結
+    for (const { keywords, linkContains } of linkKeywords) {
+      const mentionedInResponse = keywords.some(kw => aiResponse.includes(kw));
+      if (mentionedInResponse) {
+        // 在知識庫結果中找有這個連結的
+        const matchingKnowledge = relevantKnowledge.find(k => k.link_url?.includes(linkContains));
+        if (matchingKnowledge?.link_text && matchingKnowledge?.link_url) {
+          linkText = matchingKnowledge.link_text;
+          linkUrl = matchingKnowledge.link_url;
+          console.log(`Smart link match: "${keywords.join('/')}" -> ${linkText}`);
+          break;
+        }
       }
+    }
+
+    // 如果沒有智慧匹配到，且 AI 回答有提到「按鈕」「點下方」，使用第一筆有連結的知識
+    if (!linkUrl && /按鈕|點下方|看更多/.test(aiResponse)) {
+      for (const k of relevantKnowledge) {
+        if (k.link_text && k.link_url) {
+          linkText = k.link_text;
+          linkUrl = k.link_url;
+          console.log(`Fallback link from: "${k.title}" -> ${linkText}`);
+          break;
+        }
+      }
+    }
+
+    if (linkUrl) {
+      console.log(`Final link: ${linkText} -> ${linkUrl}`);
+    } else {
+      console.log(`No link will be shown`);
     }
 
     // Save AI response with link info
