@@ -6,7 +6,7 @@ import {
   useNavigate,
   useLocation,
 } from "react-router-dom";
-import { getAuthors, addTextKnowledge, transcribeAudio, categorizeContent, Author } from "../services/api";
+import { getAuthors, createAuthor, addTextKnowledge, transcribeAudio, categorizeContent, Author } from "../services/api";
 import {
   Menu,
   X,
@@ -227,11 +227,20 @@ export function DashboardLayout() {
 
   const handleAddAuthor = async () => {
     if (!newAuthorName.trim() || !newAuthorSlug.trim()) return;
-    // TODO: Call API to add author
-    alert(`新增作者: ${newAuthorName} (/${newAuthorSlug})`);
-    setShowAddAuthor(false);
-    setNewAuthorName("");
-    setNewAuthorSlug("");
+    try {
+      const result = await createAuthor(newAuthorName.trim(), newAuthorSlug.trim());
+      if (result.success) {
+        setShowAddAuthor(false);
+        setNewAuthorName("");
+        setNewAuthorSlug("");
+        // 重新載入作者列表
+        await loadAuthors();
+        // 導航到新作者頁面
+        navigate(`/${result.author.slug}`);
+      }
+    } catch (error) {
+      alert(error instanceof Error ? error.message : '新增作者失敗');
+    }
   };
 
   return (
@@ -291,17 +300,9 @@ export function DashboardLayout() {
                         : "text-gray-700 hover:bg-black/5"
                     }`}
                   >
-                    {author.avatar_url ? (
-                      <img
-                        src={author.avatar_url}
-                        alt=""
-                        className="w-10 h-10 rounded-full object-cover"
-                      />
-                    ) : (
-                      <div className="w-10 h-10 rounded-full bg-gradient-to-br from-[#fffbd5] to-[#b20a2c] flex items-center justify-center text-[#b20a2c] font-medium">
-                        {author.name[0]}
-                      </div>
-                    )}
+                    <div className="w-10 h-10 rounded-full bg-gradient-to-br from-[#fffbd5] to-[#b20a2c] flex items-center justify-center text-[#b20a2c] font-medium">
+                      {author.name[0]}
+                    </div>
                     <div className="flex-1 min-w-0">
                       <p className="font-medium truncate">{author.name}</p>
                       <p className="text-xs text-gray-500 truncate">
@@ -398,17 +399,9 @@ export function DashboardLayout() {
             {/* Current Author */}
             {currentAuthor && (
               <div className="flex items-center gap-2">
-                {currentAuthor.avatar_url ? (
-                  <img
-                    src={currentAuthor.avatar_url}
-                    alt=""
-                    className="w-7 h-7 rounded-full"
-                  />
-                ) : (
-                  <div className="w-7 h-7 rounded-full bg-gradient-to-br from-[#fffbd5] to-[#b20a2c] flex items-center justify-center text-[#b20a2c] text-xs font-medium">
-                    {currentAuthor.name[0]}
-                  </div>
-                )}
+                <div className="w-7 h-7 rounded-full bg-gradient-to-br from-[#fffbd5] to-[#b20a2c] flex items-center justify-center text-[#b20a2c] text-xs font-medium">
+                  {currentAuthor.name[0]}
+                </div>
                 <span className="font-medium text-gray-800 hidden sm:block">
                   {currentAuthor.name}
                 </span>

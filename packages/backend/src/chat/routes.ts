@@ -198,7 +198,9 @@ ${knowledgeContent}
       console.log(`Knowledge-based answer: "${aiResponse}"`);
     } else {
       // 沒有匹配到知識庫，使用 AI 生成回答
-      const enhancedPrompt = `${author.system_prompt}
+      const defaultSystemPrompt = '你是一位友善的 AI 助理，用親切的語氣回答問題。';
+      const basePrompt = author.system_prompt || defaultSystemPrompt;
+      const enhancedPrompt = `${basePrompt}
 
 【重要規則】
 - 不要稱呼用戶為「學弟」或「學妹」
@@ -320,7 +322,6 @@ chatRouter.post('/:authorSlug/session', async (req: any, res: any) => {
     res.json({
       sessionId,
       authorName: author.name,
-      avatarUrl: author.avatar_url,
     });
   } catch (error) {
     console.error('Error creating session:', error);

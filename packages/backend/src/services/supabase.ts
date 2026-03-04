@@ -9,9 +9,7 @@ export interface Author {
   id: string;
   name: string;
   slug: string;
-  admin_key: string;
-  avatar_url?: string;
-  system_prompt: string;
+  system_prompt?: string;
   temperature: number;
   created_at: string;
   updated_at: string;
@@ -33,6 +31,7 @@ export interface Message {
   role: 'user' | 'assistant';
   content: string;
   is_admin_reply?: boolean;
+  is_recalled?: boolean;
   link_text?: string;
   link_url?: string;
   read_at?: string;
@@ -110,16 +109,30 @@ export async function getAuthorBySlug(slug: string): Promise<Author | null> {
   return data as Author;
 }
 
-export async function getAuthorByAdminKey(adminKey: string): Promise<Author | null> {
+/**
+ * 建立新作者
+ */
+export async function createAuthor(name: string, slug: string): Promise<Author> {
   const client = getSupabase();
+  const now = new Date().toISOString();
 
   const { data, error } = await client
     .from('authors')
-    .select('*')
-    .eq('admin_key', adminKey)
+    .insert({
+      name,
+      slug,
+      temperature: 0.7,
+      created_at: now,
+      updated_at: now,
+    })
+    .select()
     .single();
 
-  if (error || !data) return null;
+  if (error || !data) {
+    console.error('Failed to create author:', error);
+    throw new Error(error?.message || 'Failed to create author');
+  }
+
   return data as Author;
 }
 

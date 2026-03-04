@@ -6,7 +6,6 @@ export interface Author {
   id: string;
   name: string;
   slug: string;
-  avatar_url?: string;
 }
 
 export async function getAuthors(): Promise<{ authors: Author[] }> {
@@ -15,9 +14,22 @@ export async function getAuthors(): Promise<{ authors: Author[] }> {
   return response.json();
 }
 
-export async function getAuthorInfo(slug: string): Promise<Author & { system_prompt: string; temperature: number }> {
+export async function getAuthorInfo(slug: string): Promise<Author & { system_prompt?: string; temperature: number }> {
   const response = await fetch(`${API_BASE}/admin/${slug}/info`);
   if (!response.ok) throw new Error('Failed to fetch author info');
+  return response.json();
+}
+
+export async function createAuthor(name: string, slug: string): Promise<{ success: boolean; author: Author }> {
+  const response = await fetch(`${API_BASE}/admin/authors`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name, slug }),
+  });
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.error || 'Failed to create author');
+  }
   return response.json();
 }
 

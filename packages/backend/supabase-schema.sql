@@ -11,9 +11,7 @@ CREATE TABLE IF NOT EXISTS authors (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
   name VARCHAR(100) NOT NULL,
   slug VARCHAR(50) UNIQUE NOT NULL,
-  admin_key VARCHAR(100) UNIQUE NOT NULL,
-  avatar_url TEXT,
-  system_prompt TEXT NOT NULL,
+  system_prompt TEXT,
   temperature DECIMAL(3,2) DEFAULT 0.7,
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()
@@ -76,7 +74,6 @@ CREATE TABLE IF NOT EXISTS knowledge (
 -- =============================================
 
 CREATE INDEX IF NOT EXISTS idx_authors_slug ON authors(slug);
-CREATE INDEX IF NOT EXISTS idx_authors_admin_key ON authors(admin_key);
 CREATE INDEX IF NOT EXISTS idx_conversations_author_id ON conversations(author_id);
 CREATE INDEX IF NOT EXISTS idx_conversations_session_id ON conversations(session_id);
 CREATE INDEX IF NOT EXISTS idx_conversations_last_message ON conversations(last_message_at DESC);
@@ -101,12 +98,10 @@ CREATE INDEX IF NOT EXISTS idx_knowledge_embedding
 -- 插入範例作者 (林恩如)
 -- =============================================
 
-INSERT INTO authors (name, slug, admin_key, avatar_url, system_prompt, temperature)
+INSERT INTO authors (name, slug, system_prompt, temperature)
 VALUES (
   '林恩如',
   'enru',
-  'enru_' || encode(gen_random_bytes(16), 'hex'),
-  'https://meee.com.tw/h1CHCBG.png',
   '你是 niiko 學姊，林恩如老師的 AI 助理。你的任務是幫助用戶了解美股投資和林恩如老師的課程。
 
 關於林恩如老師：
@@ -234,6 +229,9 @@ $$ LANGUAGE plpgsql;
 -- ALTER TABLE knowledge ADD COLUMN IF NOT EXISTS last_hit_at TIMESTAMPTZ;
 
 -- =============================================
--- 查看你的 Admin Key (執行此查詢)
+-- Migration: 移除 admin_key 和 avatar_url 欄位
 -- =============================================
--- SELECT slug, admin_key FROM authors;
+-- ALTER TABLE authors DROP COLUMN IF EXISTS admin_key;
+-- ALTER TABLE authors DROP COLUMN IF EXISTS avatar_url;
+-- ALTER TABLE authors ALTER COLUMN system_prompt DROP NOT NULL;
+-- DROP INDEX IF EXISTS idx_authors_admin_key;

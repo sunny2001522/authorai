@@ -4,6 +4,7 @@ import multer from 'multer';
 import {
   getAllAuthors,
   getAuthorBySlug,
+  createAuthor,
   getKnowledgeItems,
   addKnowledgeItem,
   updateKnowledgeItem,
@@ -58,11 +59,52 @@ adminRouter.get('/authors', async (_req: any, res: any) => {
         id: a.id,
         name: a.name,
         slug: a.slug,
-        avatar_url: a.avatar_url,
       })),
     });
   } catch (error) {
     console.error('Error listing authors:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// POST /admin/authors
+// Create a new author
+adminRouter.post('/authors', async (req: any, res: any) => {
+  try {
+    const { name, slug } = req.body;
+
+    if (!name || !name.trim()) {
+      return res.status(400).json({ error: 'Missing name' });
+    }
+
+    if (!slug || !slug.trim()) {
+      return res.status(400).json({ error: 'Missing slug' });
+    }
+
+    // 驗證 slug 格式（只允許小寫字母、數字、連字號）
+    const slugRegex = /^[a-z0-9-]+$/;
+    if (!slugRegex.test(slug)) {
+      return res.status(400).json({ error: 'Invalid slug format. Only lowercase letters, numbers, and hyphens are allowed.' });
+    }
+
+    // 檢查 slug 是否已存在
+    const existingAuthor = await getAuthorBySlug(slug);
+    if (existingAuthor) {
+      return res.status(409).json({ error: 'Slug already exists' });
+    }
+
+    const author = await createAuthor(name.trim(), slug.trim());
+
+    res.json({
+      success: true,
+      author: {
+        id: author.id,
+        name: author.name,
+        slug: author.slug,
+      },
+    });
+  } catch (error) {
+    console.error('Error creating author:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
@@ -79,7 +121,6 @@ adminRouter.get('/:slug/info', getAuthor, async (req: any, res: any) => {
       id: author.id,
       name: author.name,
       slug: author.slug,
-      avatar_url: author.avatar_url,
       system_prompt: author.system_prompt,
       temperature: author.temperature,
     });
