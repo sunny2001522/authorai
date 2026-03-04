@@ -251,27 +251,39 @@ export function EditKnowledgeModal({ adminKey, item, onClose, onSaved }: EditKno
             />
           </div>
 
-          {/* 連結 */}
-          <div>
-            <label className="block text-sm font-medium text-gray-300 mb-2">
+          {/* 連結 - 更明顯的樣式 */}
+          <div className="p-4 bg-gradient-to-r from-amber-500/10 to-orange-500/10 border border-amber-500/30 rounded-xl">
+            <label className="flex items-center gap-2 text-sm font-medium text-amber-400 mb-3">
+              <LinkIcon className="w-4 h-4" />
               連結按鈕（選填）
             </label>
-            <div className="flex gap-2 items-center">
-              <LinkIcon className="w-4 h-4 text-gray-500 flex-shrink-0" />
-              <input
-                type="text"
-                value={linkText}
-                onChange={(e) => setLinkText(e.target.value)}
-                placeholder="按鈕文字"
-                className="input flex-1"
-              />
-              <input
-                type="url"
-                value={linkUrl}
-                onChange={(e) => setLinkUrl(e.target.value)}
-                placeholder="https://..."
-                className="input flex-[2]"
-              />
+            <div className="space-y-3">
+              <div>
+                <label className="block text-xs text-gray-400 mb-1">按鈕文字</label>
+                <input
+                  type="text"
+                  value={linkText}
+                  onChange={(e) => setLinkText(e.target.value)}
+                  placeholder="例：前往報名、聯絡客服、查看更多"
+                  className="input w-full border-amber-500/30 focus:border-amber-500"
+                />
+              </div>
+              <div>
+                <label className="block text-xs text-gray-400 mb-1">連結網址</label>
+                <input
+                  type="url"
+                  value={linkUrl}
+                  onChange={(e) => setLinkUrl(e.target.value)}
+                  placeholder="https://..."
+                  className="input w-full border-amber-500/30 focus:border-amber-500"
+                />
+              </div>
+              {linkText && linkUrl && (
+                <div className="flex items-center gap-2 text-xs text-green-400">
+                  <span>✓</span>
+                  <span>預覽：用戶會看到「{linkText}」按鈕</span>
+                </div>
+              )}
             </div>
           </div>
 

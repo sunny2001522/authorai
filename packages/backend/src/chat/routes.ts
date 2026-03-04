@@ -67,7 +67,7 @@ chatRouter.post('/:authorSlug/message', async (req: any, res: any) => {
         author.id,
         queryEmbedding,
         5,    // 取前 5 個結果（多取一些以便重新排序）
-        0.35  // 相似度閾值
+        0.30  // 相似度閾值（降低以匹配更多相關知識）
       );
 
       // 3. 特殊意圖偵測：根據關鍵字優先排序相關知識
@@ -98,11 +98,26 @@ chatRouter.post('/:authorSlug/message', async (req: any, res: any) => {
         }
       }
 
-      // 3b. 股票代號偵測：如果查詢包含股票代號，優先使用「想要老師講特定的股票」
+      // 3b. 訂閱/續約偵測：優先找訂閱管理相關知識
+      const hasSubscriptionKeyword = /續約|訂閱|換信用卡|更換卡|扣款|付款方式|會員中心/.test(content);
+      if (hasSubscriptionKeyword && !hasRefundKeyword && relevantKnowledge.length > 0) {
+        const subscriptionIndex = relevantKnowledge.findIndex(
+          k => k.title.includes('續約') || k.title.includes('訂閱') ||
+               k.link_url?.includes('memberSubscription') || k.content?.includes('訂閱管理')
+        );
+        if (subscriptionIndex > 0) {
+          const subscriptionKnowledge = relevantKnowledge[subscriptionIndex];
+          relevantKnowledge.splice(subscriptionIndex, 1);
+          relevantKnowledge.unshift(subscriptionKnowledge);
+          console.log(`Subscription query detected, prioritizing: "${subscriptionKnowledge.title}"`);
+        }
+      }
+
+      // 3c. 股票代號偵測：如果查詢包含股票代號，優先使用「想要老師講特定的股票」
       const hasStockCode = /\d{4,6}|[A-Z]{2,5}/i.test(content);
       const hasStockKeyword = /股票|推薦|可以買|該買|能買|看好|分析|明牌/.test(content);
 
-      if ((hasStockCode || hasStockKeyword) && !hasRefundKeyword && relevantKnowledge.length > 0) {
+      if ((hasStockCode || hasStockKeyword) && !hasRefundKeyword && !hasSubscriptionKeyword && relevantKnowledge.length > 0) {
         const stockKnowledgeIndex = relevantKnowledge.findIndex(
           k => k.title.includes('想要老師講特定的股票') || k.link_url?.includes('enbaoai')
         );
@@ -216,11 +231,11 @@ ${knowledgeContents}
 
     // 定義關鍵字與連結的對應關係
     const linkKeywords = [
-      { keywords: ['客服', '聯絡', '進線', '諮詢'], linkContains: 'line.me' },
+      { keywords: ['客服', '聯絡', '進線', '諮詢', '小幫手'], linkContains: 'line.me' },
       { keywords: ['恩寶AI', '恩寶', '個股', '股票分析'], linkContains: 'enbaoai' },
       { keywords: ['報名', '課程'], linkContains: 'imoney889' },
       { keywords: ['服務條款', '條款'], linkContains: 'tos.aspx' },
-      { keywords: ['訂閱', '續約'], linkContains: 'memberSubscription' },
+      { keywords: ['訂閱', '續約', '會員中心', '訂閱管理', '信用卡', '扣款', '付款'], linkContains: 'memberSubscription' },
       { keywords: ['開戶', '口袋'], linkContains: 'pocket.tw' },
     ];
 
