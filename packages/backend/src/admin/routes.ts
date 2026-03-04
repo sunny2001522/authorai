@@ -17,9 +17,12 @@ import {
   getConversationById,
   addAdminMessage,
   recallAdminMessage,
+  getKnowledgeWithoutEmbedding,
+  updateKnowledgeEmbedding,
 } from '../services/supabase';
 import { transcribeAudio } from '../services/whisper';
 import { processKnowledgeContent } from '../services/gemini';
+import { generateEmbedding } from '../services/embedding';
 
 export const adminRouter = Router();
 
@@ -378,6 +381,56 @@ adminRouter.post('/:slug/knowledge/process', getAuthor, async (req: any, res: an
   }
 });
 
+// POST /admin/:slug/knowledge/categorize
+// AI 分類並存儲知識內容
+adminRouter.post('/:slug/knowledge/categorize', getAuthor, async (req: any, res: any) => {
+  try {
+    const { author } = req;
+    const { content } = req.body;
+
+    if (!content || !content.trim()) {
+      return res.status(400).json({ error: 'Missing content' });
+    }
+
+    // 1. 使用 AI 處理內容
+    const result = await processKnowledgeContent(content.trim());
+
+    // 2. 將每個項目存入資料庫並生成 embedding
+    const savedItems: Array<{ id: string; title: string; category: string; sub_category?: string }> = [];
+
+    for (const item of result.items) {
+      const id = await addKnowledgeItem(author.id, {
+        title: item.title,
+        content: item.content,
+        category: item.category,
+        subcategory1: item.sub_category,
+      });
+      savedItems.push({
+        id,
+        title: item.title,
+        category: item.category,
+        sub_category: item.sub_category,
+      });
+
+      // 自動生成 embedding（背景執行）
+      generateEmbedding(`${item.title} ${item.content}`)
+        .then(embedding => updateKnowledgeEmbedding(author.id, id, embedding))
+        .then(() => console.log(`Generated embedding for: "${item.title}"`))
+        .catch(e => console.error(`Failed to generate embedding for "${item.title}":`, e));
+    }
+
+    // 3. 回傳前端期望的格式
+    res.json({
+      success: true,
+      message: `已成功新增 ${savedItems.length} 筆知識`,
+      items: savedItems,
+    });
+  } catch (error) {
+    console.error('Error categorizing content:', error);
+    res.status(500).json({ error: 'Failed to categorize content' });
+  }
+});
+
 // POST /admin/:slug/knowledge/text
 // Add text knowledge
 adminRouter.post('/:slug/knowledge/text', getAuthor, async (req: any, res: any) => {
@@ -402,6 +455,12 @@ adminRouter.post('/:slug/knowledge/text', getAuthor, async (req: any, res: any) 
       link_text: linkText,
       link_url: linkUrl,
     });
+
+    // 自動生成 embedding（背景執行，不阻塞回應）
+    generateEmbedding(`${title} ${content}`)
+      .then(embedding => updateKnowledgeEmbedding(authorId, itemId, embedding))
+      .then(() => console.log(`Generated embedding for new knowledge: "${title}"`))
+      .catch(e => console.error(`Failed to generate embedding for "${title}":`, e));
 
     res.json({ id: itemId, success: true });
   } catch (error) {
@@ -449,6 +508,43 @@ adminRouter.delete('/:slug/knowledge/:itemId', getAuthor, async (req: any, res: 
   } catch (error) {
     console.error('Error deleting knowledge:', error);
     res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// POST /admin/:slug/knowledge/generate-embeddings
+// 為所有缺少 embedding 的知識項目生成向量
+adminRouter.post('/:slug/knowledge/generate-embeddings', getAuthor, async (req: any, res: any) => {
+  try {
+    const { author } = req;
+    const items = await getKnowledgeWithoutEmbedding(author.id);
+
+    console.log(`Found ${items.length} knowledge items without embedding for author ${author.slug}`);
+
+    let processed = 0;
+    const errors: string[] = [];
+
+    for (const item of items) {
+      try {
+        const text = `${item.title} ${item.content}`;
+        const embedding = await generateEmbedding(text);
+        await updateKnowledgeEmbedding(author.id, item.id, embedding);
+        processed++;
+        console.log(`Generated embedding for "${item.title}"`);
+      } catch (e) {
+        console.error(`Failed to generate embedding for item ${item.id}:`, e);
+        errors.push(item.title);
+      }
+    }
+
+    res.json({
+      success: true,
+      total: items.length,
+      processed,
+      errors: errors.length > 0 ? errors : undefined,
+    });
+  } catch (error) {
+    console.error('Error generating embeddings:', error);
+    res.status(500).json({ error: 'Failed to generate embeddings' });
   }
 });
 

@@ -7,13 +7,14 @@ import {
   addMessage,
   getConversationMessages,
   updateConversationSummary,
-  getKnowledgeItems,
   getUnreadAdminMessages,
   markMessagesAsRead,
   incrementKnowledgeHitCount,
-  KnowledgeItem,
+  searchKnowledge,
+  KnowledgeSearchResult,
 } from '../services/supabase';
 import { generateResponse, generateSummary, ChatMessage } from '../services/gemini';
+import { generateEmbedding } from '../services/embedding';
 
 export const chatRouter = Router();
 
@@ -55,104 +56,23 @@ chatRouter.post('/:authorSlug/message', async (req: any, res: any) => {
       content: m.content,
     }));
 
-    // 簡單文字搜索：找出相關的知識庫內容
-    let relevantKnowledge: KnowledgeItem[] = [];
+    // 使用向量搜尋找相關知識（語意匹配）
+    let relevantKnowledge: KnowledgeSearchResult[] = [];
     try {
-      const allKnowledge = await getKnowledgeItems(author.id);
-      const queryLower = content.toLowerCase();
+      // 1. 生成查詢的 embedding
+      const queryEmbedding = await generateEmbedding(content);
 
-      // 計算每個知識項目的匹配分數
-      const scored = allKnowledge.map(item => {
-        const titleLower = item.title.toLowerCase();
-        const contentLower = item.content.toLowerCase();
-        const combined = titleLower + ' ' + contentLower;
-        let score = 0;
+      // 2. 使用向量搜尋找相關知識
+      relevantKnowledge = await searchKnowledge(
+        author.id,
+        queryEmbedding,
+        3,    // 取前 3 個結果
+        0.35  // 相似度閾值（降低以增加召回率）
+      );
 
-        // 基本關鍵字匹配（單字匹配）
-        const keywords = queryLower.replace(/[？?！!，,。.]/g, '').split('');
-        for (let i = 0; i < keywords.length - 1; i++) {
-          const bigram = keywords[i] + keywords[i + 1];
-          if (bigram.length >= 2 && combined.includes(bigram)) {
-            score += 1;
-          }
-        }
-
-        // ========== 意圖匹配規則 ==========
-
-        // 【課程報名相關 - 最高優先級】
-        // 匹配：美股課、台股課、課程、報名、上課等
-        // 必須在股票推薦規則之前，避免「美股課」被股票規則攔截
-        const isCourseQuery = queryLower.match(/美股課|台股課|課程|報名|上課|學習|體驗|講座|免費課/);
-        if (isCourseQuery) {
-          // 特定課程匹配（美股課）
-          if (queryLower.includes('美股')) {
-            if (combined.includes('美股') && (combined.includes('課') || combined.includes('報名'))) {
-              score += 60;  // 最高優先級，超過股票推薦的 50 分
-            }
-          }
-          // 特定課程匹配（台股課）
-          else if (queryLower.includes('台股')) {
-            if (combined.includes('台股') || combined.includes('課程') || combined.includes('報名')) {
-              score += 55;
-            }
-          }
-          // 一般課程查詢
-          else if (combined.includes('課程') || combined.includes('報名') || combined.includes('課')) {
-            score += 25;  // 高於股票推薦的一般匹配 20 分
-          }
-        }
-
-        // 股票推薦/買賣相關 → 匹配「想要老師講特定的股票」
-        // 各種問法：買哪檔、推薦什麼、哪支股票、個股分析、明牌、飆股、好股等
-        // 也包含股票代號（如 0050, 2330, AAPL, TSLA 等）
-        // 注意：已移除單獨的「股」字，避免「美股課」被誤判
-        const isStockRecommendQuestion = queryLower.match(
-          /股票|買|賣|推薦|個股|明牌|飆股|好股|哪檔|哪支|哪一檔|什麼股|看好|看漲|看跌|進場|出場|加碼|存股|標的|投資.*什麼|\d{4,6}|[a-z]{2,5}/i
-        );
-        // 排除課程相關查詢（避免「美股課」被誤判為股票推薦）
-        const isCourseRelated = queryLower.match(/課|報名|上課|學習|體驗|講座/);
-        if (isStockRecommendQuestion && !isCourseRelated) {
-          // 優先匹配「想要老師講特定的股票」這篇
-          if (titleLower.includes('股票') && titleLower.includes('老師')) {
-            score += 50;  // 最高優先級
-          } else if (titleLower.includes('股票') || contentLower.includes('股票')) {
-            score += 20;
-          }
-        }
-
-        // APP/軟體相關
-        if (queryLower.match(/app|軟體|強棒|下載|安裝/i)) {
-          if (combined.match(/app|軟體|強棒/i)) score += 15;
-        }
-
-        // 詐騙/私訊相關
-        if (queryLower.match(/詐騙|私訊|假.*助理|騙/)) {
-          if (combined.includes('詐騙')) score += 20;
-        }
-
-        // 群組相關
-        if (queryLower.match(/群|社群|加入|連結/)) {
-          if (combined.includes('群')) score += 15;
-        }
-
-        // 付款/退款相關
-        if (queryLower.match(/付款|退款|刷卡|信用卡|繳費/)) {
-          if (combined.match(/付款|退|刷|信用卡|繳費/)) score += 15;
-        }
-
-        return { item, score };
-      });
-
-      // 只取分數 > 0 的，按分數排序，取前 3 個
-      relevantKnowledge = scored
-        .filter(s => s.score > 0)
-        .sort((a, b) => b.score - a.score)
-        .slice(0, 3)
-        .map(s => s.item);
-
-      console.log(`Found ${relevantKnowledge.length} relevant knowledge items for query: "${content}"`);
+      console.log(`Vector search found ${relevantKnowledge.length} results for query: "${content}"`);
       if (relevantKnowledge.length > 0) {
-        console.log(`Top match: "${relevantKnowledge[0].title}" (link: ${relevantKnowledge[0].link_url || 'none'})`);
+        console.log(`Top match: "${relevantKnowledge[0].title}" (similarity: ${relevantKnowledge[0].similarity.toFixed(3)}, link: ${relevantKnowledge[0].link_url || 'none'})`);
 
         // 更新命中次數
         try {
@@ -162,7 +82,7 @@ chatRouter.post('/:authorSlug/message', async (req: any, res: any) => {
         }
       }
     } catch (e) {
-      console.error('Knowledge search failed:', e);
+      console.error('Vector search failed:', e);
     }
 
     // 生成 AI 回答

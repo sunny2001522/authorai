@@ -360,18 +360,19 @@ export async function deleteKnowledgeItem(
 // ============ Knowledge Search (RAG) ============
 
 /**
- * 向量搜索知識庫
+ * 向量搜索知識庫（包含共用知識）
+ * 使用 Gemini embedding 進行語意搜尋
  */
 export async function searchKnowledge(
   authorId: string,
   queryEmbedding: number[],
   matchCount: number = 5,
-  matchThreshold: number = 0.5
+  matchThreshold: number = 0.35
 ): Promise<KnowledgeSearchResult[]> {
   const client = getSupabase();
 
-  // 調用 Supabase RPC 函數進行向量搜索
-  const { data, error } = await client.rpc('search_knowledge', {
+  // 調用 Supabase RPC 函數進行向量搜索（包含作者知識 + 共用知識）
+  const { data, error } = await client.rpc('search_knowledge_v2', {
     p_author_id: authorId,
     p_query_embedding: queryEmbedding,
     p_match_count: matchCount,
