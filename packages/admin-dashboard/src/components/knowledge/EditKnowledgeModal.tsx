@@ -253,7 +253,7 @@ export function EditKnowledgeModal({ adminKey, item, onClose, onSaved }: EditKno
 
           {/* 連結 - 更明顯的樣式 */}
           <div className="p-4 bg-gradient-to-r from-amber-500/10 to-orange-500/10 border border-amber-500/30 rounded-xl">
-            <label className="flex items-center gap-2 text-sm font-medium text-amber-400 mb-3">
+            <label className="flex items-center gap-2 text-sm font-medium text-amber-600 mb-3">
               <LinkIcon className="w-4 h-4" />
               連結按鈕（選填）
             </label>

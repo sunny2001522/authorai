@@ -1,6 +1,19 @@
-import { useState, useRef, useCallback, useEffect } from 'react';
-import { X, Mic, Square, Loader2, Sparkles, Plus, Link as LinkIcon } from 'lucide-react';
-import { addTextKnowledge, transcribeAudio, getCategories, processKnowledgeWithAI } from '../../services/api';
+import { useState, useRef, useCallback, useEffect } from "react";
+import {
+  X,
+  Mic,
+  Square,
+  Loader2,
+  Sparkles,
+  Plus,
+  Link as LinkIcon,
+} from "lucide-react";
+import {
+  addTextKnowledge,
+  transcribeAudio,
+  getCategories,
+  processKnowledgeWithAI,
+} from "../../services/api";
 
 interface AudioRecorderModalProps {
   adminKey: string;
@@ -72,31 +85,39 @@ function EditableSelect({
 // 即時轉錄間隔（毫秒）
 const TRANSCRIBE_INTERVAL = 3000;
 
-export function AudioRecorderModal({ adminKey, onClose, onSaved }: AudioRecorderModalProps) {
+export function AudioRecorderModal({
+  adminKey,
+  onClose,
+  onSaved,
+}: AudioRecorderModalProps) {
   // 錄音狀態
   const [isRecording, setIsRecording] = useState(false);
   const [recordingTime, setRecordingTime] = useState(0);
 
   // 即時轉錄狀態
-  const [transcribedText, setTranscribedText] = useState('');
+  const [transcribedText, setTranscribedText] = useState("");
   const [isTranscribing, setIsTranscribing] = useState(false);
-  const [pendingText, setPendingText] = useState(''); // 正在處理中的文字
+  const [pendingText, setPendingText] = useState(""); // 正在處理中的文字
 
   // AI 處理狀態
   const [isProcessing, setIsProcessing] = useState(false);
   const [aiProcessed, setAiProcessed] = useState(false);
-  const [editingItems, setEditingItems] = useState<Array<{
-    title: string;
-    content: string;
-    category: string;
-    subcategory1: string;
-    linkText: string;
-    linkUrl: string;
-  }>>([]);
+  const [editingItems, setEditingItems] = useState<
+    Array<{
+      title: string;
+      content: string;
+      category: string;
+      subcategory1: string;
+      linkText: string;
+      linkUrl: string;
+    }>
+  >([]);
 
   const [isShared, setIsShared] = useState(false);
   const [categories, setCategories] = useState<string[]>([]);
-  const [subcategory1Map, setSubcategory1Map] = useState<Record<string, string[]>>({});
+  const [subcategory1Map, setSubcategory1Map] = useState<
+    Record<string, string[]>
+  >({});
   const [categoriesLoaded, setCategoriesLoaded] = useState(false);
 
   const [saving, setSaving] = useState(false);
@@ -116,7 +137,7 @@ export function AudioRecorderModal({ adminKey, onClose, onSaved }: AudioRecorder
   const formatTime = (seconds: number) => {
     const mins = Math.floor(seconds / 60);
     const secs = seconds % 60;
-    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+    return `${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`;
   };
 
   // 載入分類選項
@@ -128,7 +149,7 @@ export function AudioRecorderModal({ adminKey, onClose, onSaved }: AudioRecorder
       setSubcategory1Map(data.subcategory1Map);
       setCategoriesLoaded(true);
     } catch (err) {
-      console.error('Failed to load categories:', err);
+      console.error("Failed to load categories:", err);
     }
   }, [adminKey, categoriesLoaded]);
 
@@ -148,7 +169,7 @@ export function AudioRecorderModal({ adminKey, onClose, onSaved }: AudioRecorder
 
     try {
       // 將所有累積的音訊合併成一個 blob
-      const blob = new Blob(chunks, { type: 'audio/webm' });
+      const blob = new Blob(chunks, { type: "audio/webm" });
 
       const result = await transcribeAudio(blob);
       if (result.success && result.text) {
@@ -156,7 +177,7 @@ export function AudioRecorderModal({ adminKey, onClose, onSaved }: AudioRecorder
         lastTranscribedIndexRef.current = chunks.length;
       }
     } catch (err) {
-      console.error('Transcription error:', err);
+      console.error("Transcription error:", err);
     } finally {
       isTranscribingRef.current = false;
       setIsTranscribing(false);
@@ -167,8 +188,8 @@ export function AudioRecorderModal({ adminKey, onClose, onSaved }: AudioRecorder
   const startRecording = async () => {
     try {
       setError(null);
-      setTranscribedText('');
-      setPendingText('');
+      setTranscribedText("");
+      setPendingText("");
       allChunksRef.current = [];
       lastTranscribedIndexRef.current = 0;
 
@@ -176,7 +197,7 @@ export function AudioRecorderModal({ adminKey, onClose, onSaved }: AudioRecorder
       streamRef.current = stream;
 
       const mediaRecorder = new MediaRecorder(stream, {
-        mimeType: 'audio/webm;codecs=opus',
+        mimeType: "audio/webm;codecs=opus",
       });
 
       mediaRecorderRef.current = mediaRecorder;
@@ -188,7 +209,7 @@ export function AudioRecorderModal({ adminKey, onClose, onSaved }: AudioRecorder
       };
 
       mediaRecorder.onstop = async () => {
-        stream.getTracks().forEach(track => track.stop());
+        stream.getTracks().forEach((track) => track.stop());
 
         // 停止即時轉錄定時器
         if (transcribeIntervalRef.current) {
@@ -207,16 +228,15 @@ export function AudioRecorderModal({ adminKey, onClose, onSaved }: AudioRecorder
 
       // 計時器
       timerRef.current = setInterval(() => {
-        setRecordingTime(prev => prev + 1);
+        setRecordingTime((prev) => prev + 1);
       }, 1000);
 
       // 即時轉錄定時器：每 3 秒轉錄一次
       transcribeIntervalRef.current = setInterval(() => {
         transcribeCurrentChunks();
       }, TRANSCRIBE_INTERVAL);
-
     } catch (err) {
-      setError('無法存取麥克風，請確認已授權麥克風權限');
+      setError("無法存取麥克風，請確認已授權麥克風權限");
       console.error(err);
     }
   };
@@ -237,15 +257,15 @@ export function AudioRecorderModal({ adminKey, onClose, onSaved }: AudioRecorder
   const finalTranscribe = async () => {
     const chunks = allChunksRef.current;
     if (chunks.length === 0) {
-      setError('沒有錄到任何音訊');
+      setError("沒有錄到任何音訊");
       return;
     }
 
     setIsTranscribing(true);
-    setPendingText('正在完成最終轉錄...');
+    setPendingText("正在完成最終轉錄...");
 
     try {
-      const blob = new Blob(chunks, { type: 'audio/webm' });
+      const blob = new Blob(chunks, { type: "audio/webm" });
       const result = await transcribeAudio(blob);
 
       if (result.success && result.text) {
@@ -253,14 +273,14 @@ export function AudioRecorderModal({ adminKey, onClose, onSaved }: AudioRecorder
         // 轉錄成功後自動觸發 AI 處理
         await handleAIProcess(result.text);
       } else {
-        setError('語音轉文字失敗，請重新錄製');
+        setError("語音轉文字失敗，請重新錄製");
       }
     } catch (err) {
-      setError('語音轉文字失敗，請稍後再試');
+      setError("語音轉文字失敗，請稍後再試");
       console.error(err);
     } finally {
       setIsTranscribing(false);
-      setPendingText('');
+      setPendingText("");
     }
   };
 
@@ -278,38 +298,44 @@ export function AudioRecorderModal({ adminKey, onClose, onSaved }: AudioRecorder
       const result = await processKnowledgeWithAI(adminKey, text);
 
       if (result.success && result.items.length > 0) {
-        setEditingItems(result.items.map(item => ({
-          title: item.title,
-          content: item.content,
-          category: item.category,
-          subcategory1: item.sub_category || '',
-          linkText: '',
-          linkUrl: '',
-        })));
+        setEditingItems(
+          result.items.map((item) => ({
+            title: item.title,
+            content: item.content,
+            category: item.category,
+            subcategory1: item.sub_category || "",
+            linkText: "",
+            linkUrl: "",
+          })),
+        );
         setAiProcessed(true);
       } else {
         // AI 處理失敗，使用原始文字
-        setEditingItems([{
-          title: text.slice(0, 20) + (text.length > 20 ? '...' : ''),
-          content: text,
-          category: '',
-          subcategory1: '',
-          linkText: '',
-          linkUrl: '',
-        }]);
+        setEditingItems([
+          {
+            title: text.slice(0, 20) + (text.length > 20 ? "..." : ""),
+            content: text,
+            category: "",
+            subcategory1: "",
+            linkText: "",
+            linkUrl: "",
+          },
+        ]);
         setAiProcessed(true);
       }
     } catch (err) {
-      console.error('AI processing failed:', err);
+      console.error("AI processing failed:", err);
       // AI 處理失敗，使用原始文字
-      setEditingItems([{
-        title: text.slice(0, 20) + (text.length > 20 ? '...' : ''),
-        content: text,
-        category: '',
-        subcategory1: '',
-        linkText: '',
-        linkUrl: '',
-      }]);
+      setEditingItems([
+        {
+          title: text.slice(0, 20) + (text.length > 20 ? "..." : ""),
+          content: text,
+          category: "",
+          subcategory1: "",
+          linkText: "",
+          linkUrl: "",
+        },
+      ]);
       setAiProcessed(true);
     } finally {
       setIsProcessing(false);
@@ -318,22 +344,24 @@ export function AudioRecorderModal({ adminKey, onClose, onSaved }: AudioRecorder
 
   // 更新單個項目
   const updateItem = (index: number, field: string, value: string) => {
-    setEditingItems(prev => prev.map((item, i) =>
-      i === index ? { ...item, [field]: value } : item
-    ));
+    setEditingItems((prev) =>
+      prev.map((item, i) => (i === index ? { ...item, [field]: value } : item)),
+    );
   };
 
   // 刪除項目
   const removeItem = (index: number) => {
-    setEditingItems(prev => prev.filter((_, i) => i !== index));
+    setEditingItems((prev) => prev.filter((_, i) => i !== index));
   };
 
   // 儲存所有項目
   const handleSave = async () => {
-    const validItems = editingItems.filter(item => item.title.trim() && item.content.trim());
+    const validItems = editingItems.filter(
+      (item) => item.title.trim() && item.content.trim(),
+    );
 
     if (validItems.length === 0) {
-      setError('請至少填寫一筆有效的知識');
+      setError("請至少填寫一筆有效的知識");
       return;
     }
 
@@ -356,7 +384,7 @@ export function AudioRecorderModal({ adminKey, onClose, onSaved }: AudioRecorder
 
       onSaved();
     } catch (err) {
-      setError('儲存失敗，請稍後再試');
+      setError("儲存失敗，請稍後再試");
       console.error(err);
     } finally {
       setSaving(false);
@@ -365,8 +393,8 @@ export function AudioRecorderModal({ adminKey, onClose, onSaved }: AudioRecorder
 
   // 重置，重新錄音
   const handleReset = () => {
-    setTranscribedText('');
-    setPendingText('');
+    setTranscribedText("");
+    setPendingText("");
     setAiProcessed(false);
     setEditingItems([]);
     setRecordingTime(0);
@@ -378,9 +406,10 @@ export function AudioRecorderModal({ adminKey, onClose, onSaved }: AudioRecorder
   useEffect(() => {
     return () => {
       if (timerRef.current) clearInterval(timerRef.current);
-      if (transcribeIntervalRef.current) clearInterval(transcribeIntervalRef.current);
+      if (transcribeIntervalRef.current)
+        clearInterval(transcribeIntervalRef.current);
       if (streamRef.current) {
-        streamRef.current.getTracks().forEach(track => track.stop());
+        streamRef.current.getTracks().forEach((track) => track.stop());
       }
     };
   }, []);
@@ -460,11 +489,14 @@ export function AudioRecorderModal({ adminKey, onClose, onSaved }: AudioRecorder
                   )}
                 </div>
 
-                {!isRecording && !isTranscribing && !isProcessing && !transcribedText && (
-                  <p className="mt-4 text-sm text-gray-400">
-                    點擊開始錄音，邊說邊即時轉錄
-                  </p>
-                )}
+                {!isRecording &&
+                  !isTranscribing &&
+                  !isProcessing &&
+                  !transcribedText && (
+                    <p className="mt-4 text-sm text-gray-400">
+                      點擊開始錄音，邊說邊即時轉錄
+                    </p>
+                  )}
               </div>
 
               {/* 即時轉錄結果顯示區 */}
@@ -478,7 +510,7 @@ export function AudioRecorderModal({ adminKey, onClose, onSaved }: AudioRecorder
                 <p className="text-white whitespace-pre-wrap">
                   {transcribedText || (
                     <span className="text-gray-500 italic">
-                      {isRecording ? '正在聆聽...' : '尚未開始錄音'}
+                      {isRecording ? "正在聆聽..." : "尚未開始錄音"}
                     </span>
                   )}
                   {pendingText && (
@@ -520,21 +552,25 @@ export function AudioRecorderModal({ adminKey, onClose, onSaved }: AudioRecorder
                       className="w-4 h-4 text-gray-500 bg-dark-card border-gray-600 focus:ring-gray-500"
                     />
                     <span className="text-white">共用知識</span>
-                    <span className="text-xs text-gray-500">（所有老師都可見）</span>
+                    <span className="text-xs text-gray-500">
+                      （所有老師都可見）
+                    </span>
                   </label>
                 </div>
               </div>
 
-              {error && (
-                <p className="text-red-400 text-sm">{error}</p>
-              )}
+              {error && <p className="text-red-400 text-sm">{error}</p>}
             </div>
           ) : (
             // 步驟 2：顯示 AI 處理結果
             <div className="space-y-4">
               <div className="flex items-center justify-between">
                 <p className="text-gray-300">
-                  AI 整理完成，共 <span className="text-[#b20a2c] font-semibold">{editingItems.length}</span> 筆知識
+                  AI 整理完成，共{" "}
+                  <span className="text-[#b20a2c] font-semibold">
+                    {editingItems.length}
+                  </span>{" "}
+                  筆知識
                 </p>
                 <button
                   onClick={handleReset}
@@ -576,42 +612,54 @@ export function AudioRecorderModal({ adminKey, onClose, onSaved }: AudioRecorder
                     {/* 分類 */}
                     <div className="grid grid-cols-2 gap-3">
                       <div>
-                        <label className="block text-xs text-gray-400 mb-1">分類</label>
+                        <label className="block text-xs text-gray-400 mb-1">
+                          分類
+                        </label>
                         <EditableSelect
                           value={item.category}
                           options={categories}
                           placeholder="選擇分類"
-                          onChange={(v) => updateItem(index, 'category', v)}
+                          onChange={(v) => updateItem(index, "category", v)}
                         />
                       </div>
                       <div>
-                        <label className="block text-xs text-gray-400 mb-1">子分類</label>
+                        <label className="block text-xs text-gray-400 mb-1">
+                          
+                        </label>
                         <EditableSelect
                           value={item.subcategory1}
                           options={subcategory1Map[item.category] || []}
-                          placeholder="選擇子分類"
-                          onChange={(v) => updateItem(index, 'subcategory1', v)}
+                          placeholder=""
+                          onChange={(v) => updateItem(index, "subcategory1", v)}
                         />
                       </div>
                     </div>
 
                     {/* 標題 */}
                     <div>
-                      <label className="block text-xs text-gray-400 mb-1">標題</label>
+                      <label className="block text-xs text-gray-400 mb-1">
+                        標題
+                      </label>
                       <input
                         type="text"
                         value={item.title}
-                        onChange={(e) => updateItem(index, 'title', e.target.value)}
+                        onChange={(e) =>
+                          updateItem(index, "title", e.target.value)
+                        }
                         className="input w-full"
                       />
                     </div>
 
                     {/* 內容 */}
                     <div>
-                      <label className="block text-xs text-gray-400 mb-1">內容</label>
+                      <label className="block text-xs text-gray-400 mb-1">
+                        內容
+                      </label>
                       <textarea
                         value={item.content}
-                        onChange={(e) => updateItem(index, 'content', e.target.value)}
+                        onChange={(e) =>
+                          updateItem(index, "content", e.target.value)
+                        }
                         rows={3}
                         className="textarea w-full"
                       />
@@ -619,20 +667,26 @@ export function AudioRecorderModal({ adminKey, onClose, onSaved }: AudioRecorder
 
                     {/* 連結 */}
                     <div>
-                      <label className="block text-xs text-gray-400 mb-1">連結按鈕（可選）</label>
+                      <label className="block text-xs text-gray-400 mb-1">
+                        連結按鈕（可選）
+                      </label>
                       <div className="flex gap-2 items-center">
                         <LinkIcon className="w-4 h-4 text-gray-500 flex-shrink-0" />
                         <input
                           type="text"
                           value={item.linkText}
-                          onChange={(e) => updateItem(index, 'linkText', e.target.value)}
+                          onChange={(e) =>
+                            updateItem(index, "linkText", e.target.value)
+                          }
                           placeholder="按鈕文字"
                           className="input flex-1"
                         />
                         <input
                           type="url"
                           value={item.linkUrl}
-                          onChange={(e) => updateItem(index, 'linkUrl', e.target.value)}
+                          onChange={(e) =>
+                            updateItem(index, "linkUrl", e.target.value)
+                          }
                           placeholder="https://..."
                           className="input flex-[2]"
                         />
@@ -642,9 +696,7 @@ export function AudioRecorderModal({ adminKey, onClose, onSaved }: AudioRecorder
                 ))}
               </div>
 
-              {error && (
-                <p className="text-red-400 text-sm">{error}</p>
-              )}
+              {error && <p className="text-red-400 text-sm">{error}</p>}
             </div>
           )}
         </div>
@@ -660,7 +712,7 @@ export function AudioRecorderModal({ adminKey, onClose, onSaved }: AudioRecorder
               disabled={saving || editingItems.length === 0}
               className="btn-primary disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              {saving ? '儲存中...' : `儲存 ${editingItems.length} 筆知識`}
+              {saving ? "儲存中..." : `儲存 ${editingItems.length} 筆知識`}
             </button>
           )}
         </div>

@@ -12,11 +12,14 @@ import {
   notifyBugToWebhook,
   sendAdminReply,
   recallAdminMessage,
+  addTextKnowledge,
+  searchConversations,
   Conversation,
   Message,
   KnowledgeItem,
   Author,
   DailyMessageStats,
+  ConversationSearchResult,
 } from "../services/api";
 import {
   MessageSquare,
@@ -29,7 +32,6 @@ import {
   Edit3,
   Trash2,
   Tag,
-  Plus,
   Check,
   BarChart3,
   TrendingUp,
@@ -39,6 +41,9 @@ import {
   Link as LinkIcon,
   X,
   Undo2,
+  Search,
+  Plus,
+  Loader2,
 } from "lucide-react";
 import { formatDistanceToNow, format } from "date-fns";
 import { zhTW } from "date-fns/locale";
@@ -65,8 +70,22 @@ export function AuthorDashboard() {
     return () => window.removeEventListener("resize", handleResize);
   }, []);
 
+  const isSharedPage = location.pathname.includes("/shared");
   const isKnowledgeView = location.pathname.includes("/knowledge");
-  const isSummaryView = location.pathname.includes("/summary") || location.pathname.includes("/dashboard");
+  const isSummaryView =
+    location.pathname.includes("/summary") ||
+    location.pathname.includes("/dashboard");
+
+  // 處理「通用」頁面（只有知識庫）
+  if (isSharedPage) {
+    return (
+      <KnowledgeView
+        slug="shared"
+        refreshKey={context?.knowledgeRefreshKey || 0}
+        isSharedView={true}
+      />
+    );
+  }
 
   if (!slug) {
     return (
@@ -85,12 +104,19 @@ export function AuthorDashboard() {
       <KnowledgeView
         slug={slug}
         refreshKey={context?.knowledgeRefreshKey || 0}
+        isSharedView={false}
       />
     );
   }
 
   // 電腦版使用三欄佈局，手機版維持原有設計
-  return <ConversationsView slug={slug} selectedConvId={convId} isMobile={isMobile} />;
+  return (
+    <ConversationsView
+      slug={slug}
+      selectedConvId={convId}
+      isMobile={isMobile}
+    />
+  );
 }
 
 // ============ Conversations View ============
@@ -99,11 +125,14 @@ function ConversationsView({
   slug,
   selectedConvId,
   isMobile,
+  isSharedView: _isSharedView = false,
 }: {
   slug: string;
   selectedConvId?: string;
   isMobile: boolean;
+  isSharedView?: boolean;
 }) {
+  // _isSharedView 可用於未來擴展顯示所有作者的對話
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [messages, setMessages] = useState<Message[]>([]);
   const [loading, setLoading] = useState(true);
@@ -111,16 +140,29 @@ function ConversationsView({
   const [selectedConv, setSelectedConv] = useState<string | null>(
     selectedConvId || null,
   );
-  const [selectedConvData, setSelectedConvData] = useState<Conversation | null>(null);
+  const [selectedConvData, setSelectedConvData] = useState<Conversation | null>(
+    null,
+  );
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   // 回應學員狀態
-  const [replyText, setReplyText] = useState('');
+  const [replyText, setReplyText] = useState("");
   const [sending, setSending] = useState(false);
   const [showLinkPopover, setShowLinkPopover] = useState(false);
-  const [linkText, setLinkText] = useState('');
-  const [linkUrl, setLinkUrl] = useState('');
+  const [linkText, setLinkText] = useState("");
+  const [linkUrl, setLinkUrl] = useState("");
   const [isComposing, setIsComposing] = useState(false); // IME 中文輸入狀態
+
+  // 搜尋狀態
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchResults, setSearchResults] = useState<ConversationSearchResult[]>([]);
+  const [isSearchMode, setIsSearchMode] = useState(false);
+  const [isSearching, setIsSearching] = useState(false);
+  const [searchDateRange, setSearchDateRange] = useState<{
+    start: Date | null;
+    end: Date | null;
+  }>({ start: null, end: null });
+  const [showSearchDatePicker, setShowSearchDatePicker] = useState(false);
 
   useEffect(() => {
     loadConversations();
@@ -130,7 +172,7 @@ function ConversationsView({
     if (selectedConv) {
       loadMessages(selectedConv);
       // 找到選中的對話數據
-      const conv = conversations.find(c => c.id === selectedConv);
+      const conv = conversations.find((c) => c.id === selectedConv);
       setSelectedConvData(conv || null);
     }
   }, [selectedConv, slug, conversations]);
@@ -167,15 +209,20 @@ function ConversationsView({
     }
   };
 
-  const handleDeleteConversation = async (convId: string, e: React.MouseEvent) => {
+  const handleDeleteConversation = async (
+    convId: string,
+    e: React.MouseEvent,
+  ) => {
     e.stopPropagation();
     if (!confirm("確定要刪除此對話嗎？")) return;
     try {
       await deleteConversation(slug, convId);
 
       // 計算刪除後要選擇的下一個對話
-      const currentIndex = conversations.findIndex(c => c.id === convId);
-      const remainingConversations = conversations.filter(c => c.id !== convId);
+      const currentIndex = conversations.findIndex((c) => c.id === convId);
+      const remainingConversations = conversations.filter(
+        (c) => c.id !== convId,
+      );
 
       setConversations(remainingConversations);
 
@@ -183,7 +230,10 @@ function ConversationsView({
         // 刪除的是當前選中的對話，選擇下一個
         if (remainingConversations.length > 0) {
           // 優先選擇同位置或前一個
-          const nextIndex = Math.min(currentIndex, remainingConversations.length - 1);
+          const nextIndex = Math.min(
+            currentIndex,
+            remainingConversations.length - 1,
+          );
           const nextConv = remainingConversations[nextIndex];
           setSelectedConv(nextConv.id);
           setSelectedConvData(nextConv);
@@ -205,7 +255,10 @@ function ConversationsView({
     // 如果有當前對話的訊息，顯示最後一則
     if (selectedConv === conv.id && messages.length > 0) {
       const lastMsg = messages[messages.length - 1];
-      return lastMsg.content.slice(0, 50) + (lastMsg.content.length > 50 ? '...' : '');
+      return (
+        lastMsg.content.slice(0, 50) +
+        (lastMsg.content.length > 50 ? "..." : "")
+      );
     }
     return null;
   };
@@ -216,20 +269,26 @@ function ConversationsView({
 
     setSending(true);
     try {
-      await sendAdminReply(slug, selectedConv, replyText.trim(), linkText || undefined, linkUrl || undefined);
-      setReplyText('');
-      setLinkText('');
-      setLinkUrl('');
+      await sendAdminReply(
+        slug,
+        selectedConv,
+        replyText.trim(),
+        linkText || undefined,
+        linkUrl || undefined,
+      );
+      setReplyText("");
+      setLinkText("");
+      setLinkUrl("");
       setShowLinkPopover(false);
       // 重新載入訊息
       await loadMessages(selectedConv);
       // 滾動到底部
       setTimeout(() => {
-        messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+        messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
       }, 100);
     } catch (err) {
-      console.error('Failed to send reply:', err);
-      const errorMessage = err instanceof Error ? err.message : '未知錯誤';
+      console.error("Failed to send reply:", err);
+      const errorMessage = err instanceof Error ? err.message : "未知錯誤";
       alert(`發送失敗：${errorMessage}`);
     } finally {
       setSending(false);
@@ -245,7 +304,7 @@ function ConversationsView({
 
   // 收回訊息
   const handleRecallMessage = async (messageId: string) => {
-    if (!confirm('確定要收回這則訊息嗎？用戶將無法再看到此訊息。')) return;
+    if (!confirm("確定要收回這則訊息嗎？用戶將無法再看到此訊息。")) return;
 
     try {
       await recallAdminMessage(slug, messageId);
@@ -254,9 +313,69 @@ function ConversationsView({
         await loadMessages(selectedConv);
       }
     } catch (err) {
-      console.error('Failed to recall message:', err);
-      alert('收回訊息失敗');
+      console.error("Failed to recall message:", err);
+      alert("收回訊息失敗");
     }
+  };
+
+  // 搜尋對話
+  const handleSearch = async () => {
+    if (!searchQuery.trim()) {
+      setIsSearchMode(false);
+      setSearchResults([]);
+      return;
+    }
+
+    setIsSearching(true);
+    setIsSearchMode(true);
+    try {
+      const { results } = await searchConversations(slug, {
+        q: searchQuery.trim(),
+        startDate: searchDateRange.start?.toISOString().split("T")[0],
+        endDate: searchDateRange.end?.toISOString().split("T")[0],
+      });
+      setSearchResults(results);
+    } catch (error) {
+      console.error("Search failed:", error);
+    } finally {
+      setIsSearching(false);
+    }
+  };
+
+  // 清除搜尋
+  const handleClearSearch = () => {
+    setSearchQuery("");
+    setSearchDateRange({ start: null, end: null });
+    setIsSearchMode(false);
+    setSearchResults([]);
+  };
+
+  // 從搜尋結果選擇對話
+  const handleSelectSearchResult = (result: ConversationSearchResult) => {
+    setSelectedConv(result.conversation_id);
+    // 找到對應的對話資料
+    const conv = conversations.find((c) => c.id === result.conversation_id);
+    if (conv) {
+      setSelectedConvData(conv);
+    }
+  };
+
+  // 高亮搜尋關鍵字
+  const highlightText = (text: string, query: string) => {
+    if (!query.trim()) return text;
+
+    const escapedQuery = query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const parts = text.split(new RegExp(`(${escapedQuery})`, "gi"));
+
+    return parts.map((part, i) =>
+      part.toLowerCase() === query.toLowerCase() ? (
+        <mark key={i} className="bg-yellow-200 px-0.5 rounded">
+          {part}
+        </mark>
+      ) : (
+        part
+      ),
+    );
   };
 
   // 手機版：顯示對話列表或單一對話詳情
@@ -301,7 +420,9 @@ function ConversationsView({
                         <Bot size={16} className="text-white" />
                       )}
                     </div>
-                    <div className={`max-w-[80%] ${msg.role === "assistant" ? "text-right" : ""}`}>
+                    <div
+                      className={`max-w-[80%] ${msg.role === "assistant" ? "text-right" : ""}`}
+                    >
                       <div
                         className={`inline-block px-4 py-3 rounded-2xl ${
                           msg.isRecalled
@@ -311,11 +432,15 @@ function ConversationsView({
                               : "bg-[#b20a2c] text-white rounded-br-md"
                         }`}
                       >
-                        <p className={`whitespace-pre-wrap text-[15px] leading-relaxed text-left ${msg.isRecalled ? "text-gray-500" : ""}`}>
+                        <p
+                          className={`whitespace-pre-wrap text-[15px] leading-relaxed text-left ${msg.isRecalled ? "text-gray-500" : ""}`}
+                        >
                           {msg.content}
                         </p>
                         {msg.isRecalled && (
-                          <p className="text-xs mt-1 text-gray-400 text-left">（已收回）</p>
+                          <p className="text-xs mt-1 text-gray-400 text-left">
+                            （已收回）
+                          </p>
                         )}
                       </div>
                       {/* 收回按鈕 - 只有管理員回覆且未收回才顯示 */}
@@ -330,7 +455,9 @@ function ConversationsView({
                       )}
                       {/* 連結按鈕 - 已收回的訊息不顯示連結 */}
                       {msg.linkUrl && !msg.isRecalled && (
-                        <div className={`mt-2 ${msg.role === "assistant" ? "text-right" : ""}`}>
+                        <div
+                          className={`mt-2 ${msg.role === "assistant" ? "text-right" : ""}`}
+                        >
                           <a
                             href={msg.linkUrl}
                             target="_blank"
@@ -339,7 +466,7 @@ function ConversationsView({
                           >
                             <span className="flex items-center gap-1.5">
                               <LinkIcon size={14} />
-                              {msg.linkText || '連結'}
+                              {msg.linkText || "連結"}
                             </span>
                             <span className="text-xs text-gray-500 mt-0.5 break-all text-left">
                               {msg.linkUrl}
@@ -368,7 +495,7 @@ function ConversationsView({
                   onCompositionStart={() => setIsComposing(true)}
                   onCompositionEnd={() => setIsComposing(false)}
                   onKeyDown={(e) => {
-                    if (e.key === 'Enter' && !e.shiftKey && !isComposing) {
+                    if (e.key === "Enter" && !e.shiftKey && !isComposing) {
                       e.preventDefault();
                       handleSendReply();
                     }
@@ -378,7 +505,7 @@ function ConversationsView({
                 <button
                   onClick={() => setShowLinkPopover(!showLinkPopover)}
                   className={`absolute right-2 top-1/2 -translate-y-1/2 p-1.5 rounded-lg transition-colors ${
-                    linkUrl ? 'text-[#b20a2c] bg-[#b20a2c]/10' : 'text-gray-400'
+                    linkUrl ? "text-[#b20a2c] bg-[#b20a2c]/10" : "text-gray-400"
                   }`}
                 >
                   <LinkIcon size={16} />
@@ -388,8 +515,13 @@ function ConversationsView({
                 {showLinkPopover && (
                   <div className="absolute bottom-full right-0 mb-2 p-3 bg-white border border-gray-200 rounded-xl shadow-xl w-64 z-10">
                     <div className="flex items-center justify-between mb-2">
-                      <span className="text-sm text-gray-700 font-medium">添加連結</span>
-                      <button onClick={() => setShowLinkPopover(false)} className="p-1 text-gray-400">
+                      <span className="text-sm text-gray-700 font-medium">
+                        添加連結
+                      </span>
+                      <button
+                        onClick={() => setShowLinkPopover(false)}
+                        className="p-1 text-gray-400"
+                      >
                         <X size={16} />
                       </button>
                     </div>
@@ -458,7 +590,7 @@ function ConversationsView({
                   <div className="flex items-start justify-between gap-3">
                     <div className="flex-1 min-w-0">
                       <p className="font-medium text-gray-800 truncate">
-                        {conv.summary || '新對話'}
+                        {conv.summary || "新對話"}
                       </p>
                       <div className="flex items-center gap-2 mt-1 text-sm text-gray-500">
                         <Clock size={14} />
@@ -496,18 +628,168 @@ function ConversationsView({
     <div className="h-full flex bg-white">
       {/* 左側：對話列表 */}
       <div className="w-80 border-r border-gray-200 flex flex-col bg-gray-50">
-        {/* 列表標題 */}
-        <div className="px-4 py-3 border-b border-gray-200 bg-white">
-          <h3 className="font-medium text-gray-800">對話紀錄</h3>
-          <p className="text-xs text-gray-500 mt-0.5">共 {conversations.length} 筆對話</p>
+        {/* 列表標題 + 搜尋區 */}
+        <div className="px-4 py-3 border-b border-gray-200 bg-white space-y-3">
+          <div className="flex items-center justify-between">
+            <h3 className="font-medium text-gray-800">對話紀錄</h3>
+            <p className="text-xs text-gray-500">
+              {isSearchMode
+                ? `搜尋到 ${searchResults.length} 筆`
+                : `共 ${conversations.length} 筆`}
+            </p>
+          </div>
+
+          {/* 搜尋框 */}
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+            <input
+              type="text"
+              placeholder="搜尋對話內容..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && handleSearch()}
+              className="w-full pl-9 pr-16 py-2 bg-gray-50 border border-gray-200 rounded-lg text-gray-800 placeholder-gray-400 focus:outline-none focus:border-[#b20a2c] text-sm"
+            />
+            <div className="absolute right-2 top-1/2 -translate-y-1/2 flex gap-1">
+              {(searchQuery || searchDateRange.start) && (
+                <button
+                  onClick={handleClearSearch}
+                  className="p-1.5 text-gray-400 hover:text-gray-600 rounded"
+                  title="清除搜尋"
+                >
+                  <X size={14} />
+                </button>
+              )}
+              <button
+                onClick={handleSearch}
+                disabled={isSearching}
+                className="p-1.5 text-[#b20a2c] hover:bg-[#fffbd5] rounded"
+                title="搜尋"
+              >
+                {isSearching ? (
+                  <Loader2 size={14} className="animate-spin" />
+                ) : (
+                  <Search size={14} />
+                )}
+              </button>
+            </div>
+          </div>
+
+          {/* 日期範圍選擇 */}
+          <div className="relative">
+            <button
+              onClick={() => setShowSearchDatePicker(!showSearchDatePicker)}
+              className="flex items-center gap-2 px-3 py-1.5 border border-gray-200 rounded-lg text-xs text-gray-600 hover:bg-gray-50"
+            >
+              <Calendar size={12} />
+              <span>
+                {searchDateRange.start && searchDateRange.end
+                  ? `${format(searchDateRange.start, "MM/dd")} - ${format(searchDateRange.end, "MM/dd")}`
+                  : "選擇日期範圍"}
+              </span>
+            </button>
+            {showSearchDatePicker && (
+              <>
+                <div
+                  className="fixed inset-0 z-10"
+                  onClick={() => setShowSearchDatePicker(false)}
+                />
+                <DateRangePicker
+                  startDate={searchDateRange.start}
+                  endDate={searchDateRange.end}
+                  onChange={(start, end) => {
+                    setSearchDateRange({ start, end });
+                  }}
+                  onClose={() => setShowSearchDatePicker(false)}
+                />
+              </>
+            )}
+          </div>
         </div>
 
-        {/* 對話列表 */}
+        {/* 對話列表 / 搜尋結果 */}
         <div className="flex-1 overflow-y-auto">
           {loading ? (
             <div className="flex items-center justify-center h-32">
               <div className="text-gray-400">載入中...</div>
             </div>
+          ) : isSearchMode ? (
+            /* 搜尋結果列表 */
+            searchResults.length === 0 ? (
+              <div className="flex flex-col items-center justify-center h-64 text-gray-400">
+                <Search size={36} className="mb-3 opacity-30" />
+                <p className="text-sm">找不到符合的對話</p>
+                <button
+                  onClick={handleClearSearch}
+                  className="mt-2 text-xs text-[#b20a2c] hover:underline"
+                >
+                  清除搜尋
+                </button>
+              </div>
+            ) : (
+              <div className="divide-y divide-gray-100">
+                {searchResults.map((result) => (
+                  <div
+                    key={`${result.conversation_id}-${result.message_id || "summary"}`}
+                    onClick={() => handleSelectSearchResult(result)}
+                    className={`px-4 py-3 cursor-pointer transition-colors group ${
+                      selectedConv === result.conversation_id
+                        ? "bg-[#fffbd5] border-l-2 border-l-[#b20a2c]"
+                        : "hover:bg-white border-l-2 border-l-transparent"
+                    }`}
+                  >
+                    <div className="flex items-start gap-2">
+                      <div className="flex-1 min-w-0">
+                        {/* 對話摘要 */}
+                        <p
+                          className={`font-medium truncate text-sm ${
+                            selectedConv === result.conversation_id
+                              ? "text-[#b20a2c]"
+                              : "text-gray-800"
+                          }`}
+                        >
+                          {highlightText(
+                            result.conversation_summary || "新對話",
+                            searchQuery,
+                          )}
+                        </p>
+                        {/* 匹配的訊息內容預覽 */}
+                        {result.match_type === "message" && result.message_content && (
+                          <p className="text-xs text-gray-500 mt-1 line-clamp-2">
+                            <span className="text-gray-400">
+                              {result.message_role === "user" ? "用戶：" : "AI："}
+                            </span>
+                            {highlightText(
+                              result.message_content.slice(0, 100),
+                              searchQuery,
+                            )}
+                            {result.message_content.length > 100 && "..."}
+                          </p>
+                        )}
+                        {/* 匹配類型標籤 + 時間 */}
+                        <div className="flex items-center gap-2 mt-1">
+                          <span
+                            className={`text-xs px-1.5 py-0.5 rounded ${
+                              result.match_type === "summary"
+                                ? "bg-blue-100 text-blue-600"
+                                : "bg-green-100 text-green-600"
+                            }`}
+                          >
+                            {result.match_type === "summary" ? "摘要" : "訊息"}
+                          </span>
+                          <span className="text-xs text-gray-400">
+                            {formatDistanceToNow(
+                              new Date(result.last_message_at),
+                              { addSuffix: true, locale: zhTW },
+                            )}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )
           ) : conversations.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-64 text-gray-400">
               <MessageSquare size={36} className="mb-3 opacity-30" />
@@ -528,14 +810,19 @@ function ConversationsView({
                   <div className="flex items-start justify-between gap-2">
                     <div className="flex-1 min-w-0">
                       {/* AI 摘要 */}
-                      <p className={`font-medium truncate text-sm ${
-                        selectedConv === conv.id ? "text-[#b20a2c]" : "text-gray-800"
-                      }`}>
-                        {conv.summary || '新對話'}
+                      <p
+                        className={`font-medium truncate text-sm ${
+                          selectedConv === conv.id
+                            ? "text-[#b20a2c]"
+                            : "text-gray-800"
+                        }`}
+                      >
+                        {conv.summary || "新對話"}
                       </p>
                       {/* 最後一則訊息預覽 */}
                       <p className="text-xs text-gray-500 truncate mt-1">
-                        {getLastMessagePreview(conv) || `${conv.message_count} 則訊息`}
+                        {getLastMessagePreview(conv) ||
+                          `${conv.message_count} 則訊息`}
                       </p>
                       {/* 時間 */}
                       <p className="text-xs text-gray-400 mt-1">
@@ -567,10 +854,14 @@ function ConversationsView({
             {/* 對話標題列 */}
             <div className="px-6 py-3 border-b border-gray-100 bg-white">
               <h3 className="font-medium text-gray-800">
-                {selectedConvData.summary || '新對話'}
+                {selectedConvData.summary || "新對話"}
               </h3>
               <p className="text-xs text-gray-500 mt-0.5">
-                {selectedConvData.message_count} 則訊息 · {formatDistanceToNow(new Date(selectedConvData.last_message_at), { addSuffix: true, locale: zhTW })}
+                {selectedConvData.message_count} 則訊息 ·{" "}
+                {formatDistanceToNow(
+                  new Date(selectedConvData.last_message_at),
+                  { addSuffix: true, locale: zhTW },
+                )}
               </p>
             </div>
 
@@ -598,7 +889,9 @@ function ConversationsView({
                           <Bot size={16} className="text-white" />
                         )}
                       </div>
-                      <div className={`max-w-[80%] ${msg.role === "assistant" ? "text-right" : ""} group/msg`}>
+                      <div
+                        className={`max-w-[80%] ${msg.role === "assistant" ? "text-right" : ""} group/msg`}
+                      >
                         <div
                           className={`inline-block px-4 py-3 rounded-2xl ${
                             msg.isRecalled
@@ -608,18 +901,26 @@ function ConversationsView({
                                 : "bg-[#b20a2c] text-white rounded-br-md"
                           }`}
                         >
-                          <p className={`whitespace-pre-wrap text-[15px] leading-relaxed text-left ${msg.isRecalled ? "text-gray-500" : ""}`}>
+                          <p
+                            className={`whitespace-pre-wrap text-[15px] leading-relaxed text-left ${msg.isRecalled ? "text-gray-500" : ""}`}
+                          >
                             {msg.content}
                           </p>
-                          <p className={`text-xs mt-1 text-left ${
-                            msg.isRecalled
-                              ? "text-gray-400"
-                              : msg.role === "user"
+                          <p
+                            className={`text-xs mt-1 text-left ${
+                              msg.isRecalled
                                 ? "text-gray-400"
-                                : "text-red-200"
-                          }`}>
-                            {format(new Date(msg.created_at), "HH:mm", { locale: zhTW })}
-                            {msg.isRecalled && <span className="ml-2">（已收回）</span>}
+                                : msg.role === "user"
+                                  ? "text-gray-400"
+                                  : "text-red-200"
+                            }`}
+                          >
+                            {format(new Date(msg.created_at), "HH:mm", {
+                              locale: zhTW,
+                            })}
+                            {msg.isRecalled && (
+                              <span className="ml-2">（已收回）</span>
+                            )}
                           </p>
                         </div>
                         {/* 收回按鈕 - 只有管理員回覆且未收回才顯示 */}
@@ -634,7 +935,9 @@ function ConversationsView({
                         )}
                         {/* 連結按鈕 - 已收回的訊息不顯示連結 */}
                         {msg.linkUrl && !msg.isRecalled && (
-                          <div className={`mt-2 ${msg.role === "assistant" ? "text-right" : ""}`}>
+                          <div
+                            className={`mt-2 ${msg.role === "assistant" ? "text-right" : ""}`}
+                          >
                             <a
                               href={msg.linkUrl}
                               target="_blank"
@@ -643,7 +946,7 @@ function ConversationsView({
                             >
                               <span className="flex items-center gap-1.5">
                                 <LinkIcon size={14} />
-                                {msg.linkText || '連結'}
+                                {msg.linkText || "連結"}
                               </span>
                               <span className="text-xs text-gray-500 mt-0.5 break-all text-left">
                                 {msg.linkUrl}
@@ -673,7 +976,7 @@ function ConversationsView({
                     onCompositionStart={() => setIsComposing(true)}
                     onCompositionEnd={() => setIsComposing(false)}
                     onKeyDown={(e) => {
-                      if (e.key === 'Enter' && !e.shiftKey && !isComposing) {
+                      if (e.key === "Enter" && !e.shiftKey && !isComposing) {
                         e.preventDefault();
                         handleSendReply();
                       }
@@ -684,7 +987,9 @@ function ConversationsView({
                     <button
                       onClick={() => setShowLinkPopover(!showLinkPopover)}
                       className={`p-1.5 rounded-lg transition-colors ${
-                        linkUrl ? 'text-[#b20a2c] bg-[#b20a2c]/10' : 'text-gray-400 hover:text-[#b20a2c] hover:bg-gray-100'
+                        linkUrl
+                          ? "text-[#b20a2c] bg-[#b20a2c]/10"
+                          : "text-gray-400 hover:text-[#b20a2c] hover:bg-gray-100"
                       }`}
                       title="添加連結"
                     >
@@ -695,7 +1000,9 @@ function ConversationsView({
                     {showLinkPopover && (
                       <div className="absolute bottom-full left-0 mb-2 p-3 bg-white border border-gray-200 rounded-xl shadow-xl w-64 z-10">
                         <div className="flex items-center justify-between mb-2">
-                          <span className="text-sm text-gray-700 font-medium">添加連結按鈕</span>
+                          <span className="text-sm text-gray-700 font-medium">
+                            添加連結按鈕
+                          </span>
                           <button
                             onClick={() => setShowLinkPopover(false)}
                             className="p-1 text-gray-400 hover:text-gray-600"
@@ -734,7 +1041,10 @@ function ConversationsView({
                       <LinkIcon size={12} />
                       {linkText}
                       <button
-                        onClick={() => { setLinkText(''); setLinkUrl(''); }}
+                        onClick={() => {
+                          setLinkText("");
+                          setLinkUrl("");
+                        }}
                         className="ml-1 hover:text-[#8a0823]"
                       >
                         <X size={12} />
@@ -795,14 +1105,30 @@ function translateCategory(cat: string | undefined): string {
 function KnowledgeView({
   slug,
   refreshKey,
+  isSharedView = false,
 }: {
   slug: string;
   refreshKey: number;
+  isSharedView?: boolean;
 }) {
+  const context = useOutletContext<OutletContext>();
   const [items, setItems] = useState<KnowledgeItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeCategory, setActiveCategory] = useState<string>("全部");
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState("");
+
+  // 分類資料（用於下拉選單）- 四層
+  const [allCategories, setAllCategories] = useState<string[]>([]);
+  const [subcategory1Map, setSubcategory1Map] = useState<
+    Record<string, string[]>
+  >({});
+  const [subcategory2Map, setSubcategory2Map] = useState<
+    Record<string, string[]>
+  >({});
+  const [subcategory3Map, setSubcategory3Map] = useState<
+    Record<string, string[]>
+  >({});
 
   // Get unique categories (原始值用於篩選，顯示時轉成中文)
   const categoryKeys = [
@@ -810,25 +1136,70 @@ function KnowledgeView({
     ...new Set(items.map((i) => i.category).filter(Boolean) as string[]),
   ];
 
-  // Filter items by category
-  const filteredItems =
-    activeCategory === "全部"
-      ? items
-      : items.filter((i) => i.category === activeCategory);
+  // Filter items by category and search query
+  const filteredItems = items.filter((item) => {
+    // 分類過濾
+    const categoryMatch =
+      activeCategory === "全部" || item.category === activeCategory;
+
+    // 搜尋過濾
+    const searchMatch =
+      !searchQuery.trim() ||
+      item.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      (item.content &&
+        item.content.toLowerCase().includes(searchQuery.toLowerCase()));
+
+    return categoryMatch && searchMatch;
+  });
 
   useEffect(() => {
+    // 等待 authors 載入完成後再取得資料
+    if (isSharedView && (!context?.authors || context.authors.length === 0)) {
+      return;
+    }
     loadItems();
-  }, [slug, refreshKey]);
+    loadCategories();
+  }, [slug, refreshKey, isSharedView, context?.authors]);
 
   const loadItems = async () => {
     setLoading(true);
     try {
-      const data = await getKnowledgeItems(slug);
-      setItems(data.items);
+      // 通用頁面：使用第一個作者的 slug 來取得資料，再過濾出共用知識
+      // 作者頁面：使用該作者的 slug
+      const apiSlug =
+        isSharedView && context?.authors?.length > 0
+          ? context.authors[0].slug
+          : slug;
+
+      const data = await getKnowledgeItems(apiSlug);
+
+      // 根據頁面類型過濾知識項目
+      // isSharedView: 只顯示共用知識（authorId 為 null）
+      // 作者頁面: 只顯示專屬知識（authorId 存在）
+      const filtered = isSharedView
+        ? data.items.filter((item: KnowledgeItem) => !item.authorId)
+        : data.items.filter((item: KnowledgeItem) => item.authorId);
+      setItems(filtered);
     } catch (error) {
       console.error("Failed to load knowledge:", error);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const loadCategories = async () => {
+    try {
+      const apiSlug =
+        isSharedView && context?.authors?.length > 0
+          ? context.authors[0].slug
+          : slug;
+      const data = await getCategories(apiSlug);
+      setAllCategories(data.categories);
+      setSubcategory1Map(data.subcategory1Map);
+      setSubcategory2Map(data.subcategory2Map || {});
+      setSubcategory3Map(data.subcategory3Map || {});
+    } catch (error) {
+      console.error("Failed to load categories:", error);
     }
   };
 
@@ -850,6 +1221,8 @@ function KnowledgeView({
       content?: string;
       category?: string;
       subcategory1?: string;
+      subcategory2?: string;
+      subcategory3?: string;
       linkText?: string;
       linkUrl?: string;
     },
@@ -866,17 +1239,75 @@ function KnowledgeView({
     }
   };
 
+  const handleAddNew = async () => {
+    try {
+      const apiSlug =
+        isSharedView && context?.authors?.length > 0
+          ? context.authors[0].slug
+          : slug;
+      const result = await addTextKnowledge(apiSlug, {
+        title: "新知識",
+        content: "",
+        isShared: isSharedView,
+      });
+      const now = new Date().toISOString();
+      const newItem: KnowledgeItem = {
+        id: result.id,
+        title: "新知識",
+        content: "",
+        category: "",
+        subcategory1: "",
+        subcategory2: "",
+        subcategory3: "",
+        linkText: "",
+        linkUrl: "",
+        hitCount: 0,
+        createdAt: now,
+        updatedAt: now,
+        authorId: isSharedView ? null : slug,
+      };
+      setItems((prev) => [newItem, ...prev]);
+      setEditingId(result.id);
+    } catch (error) {
+      console.error("Failed to add knowledge:", error);
+      alert("新增失敗");
+    }
+  };
+
   return (
     <div className="h-full flex flex-col bg-white">
-      {/* Category Tabs */}
+      {/* 搜尋框與新增按鈕 */}
+      <div className="px-4 pt-4">
+        <div className="max-w-3xl mx-auto flex gap-3">
+          <div className="flex-1 relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
+            <input
+              type="text"
+              placeholder="搜尋知識庫..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="w-full pl-10 pr-4 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-gray-800 placeholder-gray-400 focus:outline-none focus:border-[#b20a2c]"
+            />
+          </div>
+          <button
+            onClick={handleAddNew}
+            className="flex items-center gap-2 px-4 py-2.5 bg-[#b20a2c] text-white rounded-xl hover:bg-[#8a0823] transition-colors"
+          >
+            <Plus className="w-5 h-5" />
+            <span>新增</span>
+          </button>
+        </div>
+      </div>
+
+      {/* Category Tabs - 換行顯示 */}
       {categoryKeys.length > 1 && (
-        <div className="px-4 pt-4 pb-2 border-b border-gray-100">
-          <div className="max-w-3xl mx-auto flex gap-2 overflow-x-auto pb-2">
+        <div className="px-4 pt-3 pb-2 border-b border-gray-100">
+          <div className="max-w-3xl mx-auto flex flex-wrap gap-2">
             {categoryKeys.map((cat) => (
               <button
                 key={cat}
                 onClick={() => setActiveCategory(cat)}
-                className={`px-4 py-1.5 rounded-full text-sm font-medium whitespace-nowrap transition-colors ${
+                className={`px-4 py-1.5 rounded-full text-sm font-medium transition-colors ${
                   activeCategory === cat
                     ? "bg-[#b20a2c] text-white"
                     : "bg-gray-100 text-gray-600 hover:bg-gray-200"
@@ -913,6 +1344,10 @@ function KnowledgeView({
                   onCancel={() => setEditingId(null)}
                   onSave={(updates) => handleUpdate(item.id, updates)}
                   onDelete={() => handleDelete(item.id)}
+                  allCategories={allCategories}
+                  subcategory1Map={subcategory1Map}
+                  subcategory2Map={subcategory2Map}
+                  subcategory3Map={subcategory3Map}
                 />
               ))}
             </div>
@@ -931,6 +1366,10 @@ function KnowledgeCard({
   onCancel,
   onSave,
   onDelete,
+  allCategories,
+  subcategory1Map,
+  subcategory2Map,
+  subcategory3Map,
 }: {
   item: KnowledgeItem;
   isEditing: boolean;
@@ -941,27 +1380,49 @@ function KnowledgeCard({
     content?: string;
     category?: string;
     subcategory1?: string;
+    subcategory2?: string;
+    subcategory3?: string;
     linkText?: string;
     linkUrl?: string;
   }) => void;
   onDelete: () => void;
+  allCategories: string[];
+  subcategory1Map: Record<string, string[]>;
+  subcategory2Map: Record<string, string[]>;
+  subcategory3Map: Record<string, string[]>;
 }) {
   const [title, setTitle] = useState(item.title);
   const [content, setContent] = useState(item.content || "");
   const [category, setCategory] = useState(item.category || "");
-  const [subCategory, setSubCategory] = useState(item.subcategory1 || "");
+  const [sub1, setSub1] = useState(item.subcategory1 || "");
+  const [sub2, setSub2] = useState(item.subcategory2 || "");
+  const [sub3, setSub3] = useState(item.subcategory3 || "");
   const [linkText, setLinkText] = useState(item.linkText || "");
   const [linkUrl, setLinkUrl] = useState(item.linkUrl || "");
   const [saving, setSaving] = useState(false);
   const titleRef = useRef<HTMLInputElement>(null);
   const contentRef = useRef<HTMLTextAreaElement>(null);
 
+  // 自訂輸入模式
+  const [isCustomCategory, setIsCustomCategory] = useState(false);
+  const [isCustomSub1, setIsCustomSub1] = useState(false);
+  const [isCustomSub2, setIsCustomSub2] = useState(false);
+  const [isCustomSub3, setIsCustomSub3] = useState(false);
+
+  // 取得子分類選項
+  const getSub1Options = () => subcategory1Map[category] || [];
+  const getSub2Options = () => subcategory2Map[`${category}|${sub1}`] || [];
+  const getSub3Options = () =>
+    subcategory3Map[`${category}|${sub1}|${sub2}`] || [];
+
   // Reset form when item changes or editing starts
   useEffect(() => {
     setTitle(item.title);
     setContent(item.content || "");
     setCategory(item.category || "");
-    setSubCategory(item.subcategory1 || "");
+    setSub1(item.subcategory1 || "");
+    setSub2(item.subcategory2 || "");
+    setSub3(item.subcategory3 || "");
     setLinkText(item.linkText || "");
     setLinkUrl(item.linkUrl || "");
   }, [item]);
@@ -988,7 +1449,9 @@ function KnowledgeCard({
       title,
       content,
       category: category.trim() || undefined,
-      subcategory1: subCategory.trim() || undefined,
+      subcategory1: sub1.trim() || undefined,
+      subcategory2: sub2.trim() || undefined,
+      subcategory3: sub3.trim() || undefined,
       linkText: linkText.trim() || undefined,
       linkUrl: linkUrl.trim() || undefined,
     });
@@ -1005,7 +1468,7 @@ function KnowledgeCard({
     <div
       className={`p-4 bg-gray-50 rounded-xl border transition-colors relative group ${
         isEditing
-          ? "border-[#b20a2c] ring-2 ring-[#fffbd5]"
+          ? "border-gray-400 ring-2 ring-gray-200"
           : "border-gray-100 hover:border-gray-200"
       }`}
     >
@@ -1013,48 +1476,209 @@ function KnowledgeCard({
       <div className="flex items-start justify-between gap-2 mb-2">
         <div className="flex items-center gap-2 flex-wrap">
           {isEditing ? (
-            <>
-              <div className="inline-flex items-center gap-1 text-xs bg-[#fffbd5] rounded-full overflow-hidden border border-[#b20a2c]/30">
-                <span className="pl-2 text-[#b20a2c]">
-                  <Tag size={12} />
-                </span>
-                <input
-                  type="text"
+            <div className="inline-flex items-center gap-1 text-xs bg-gray-100 rounded-full overflow-hidden border border-gray-300">
+              <span className="pl-2 text-gray-600">
+                <Tag size={12} />
+              </span>
+              {/* 主分類 */}
+              {isCustomCategory ? (
+                <div className="flex items-center">
+                  <input
+                    type="text"
+                    value={category}
+                    onChange={(e) => setCategory(e.target.value)}
+                    placeholder="輸入分類"
+                    className="w-20 px-1 py-0.5 text-xs bg-transparent border-none outline-none text-gray-700 placeholder-gray-400"
+                    autoFocus
+                  />
+                  <button
+                    onClick={() => setIsCustomCategory(false)}
+                    className="px-1 text-gray-500 hover:text-gray-700"
+                    title="選擇現有"
+                  >
+                    ↓
+                  </button>
+                </div>
+              ) : (
+                <select
                   value={category}
-                  onChange={(e) => setCategory(e.target.value)}
-                  placeholder="分類"
-                  className="w-16 px-1 py-0.5 text-xs bg-transparent border-none outline-none text-[#b20a2c] placeholder-[#b20a2c]/50"
-                />
-                {(category || subCategory) && (
-                  <>
-                    <span className="text-[#b20a2c]/50">/</span>
-                    <input
-                      type="text"
-                      value={subCategory}
-                      onChange={(e) => setSubCategory(e.target.value)}
-                      placeholder="子分類"
-                      className="w-16 px-1 py-0.5 text-xs bg-transparent border-none outline-none text-[#b20a2c]/80 placeholder-[#b20a2c]/30"
-                    />
-                  </>
-                )}
-              </div>
-              {!category && !subCategory && (
-                <button
-                  onClick={() => setCategory("未分類")}
-                  className="inline-flex items-center gap-1 text-xs text-gray-400 hover:text-[#b20a2c] px-2 py-0.5 rounded-full border border-dashed border-gray-300 hover:border-[#b20a2c] transition-colors"
+                  onChange={(e) => {
+                    if (e.target.value === "__add_new__") {
+                      setIsCustomCategory(true);
+                      setCategory("");
+                    } else {
+                      setCategory(e.target.value);
+                      setSub1("");
+                      setSub2("");
+                      setSub3("");
+                    }
+                  }}
+                  className="px-1 py-0.5 text-xs bg-transparent border-none outline-none text-gray-700 cursor-pointer"
                 >
-                  <Plus size={12} />
-                  新增分類
-                </button>
+                  <option value="">選擇分類</option>
+                  {allCategories.map((cat) => (
+                    <option key={cat} value={cat}>
+                      {translateCategory(cat)}
+                    </option>
+                  ))}
+                  <option value="__add_new__">+ 新增</option>
+                </select>
               )}
-            </>
+              {/* 子分類 1 */}
+              {category && (
+                <>
+                  <span className="text-gray-400">/</span>
+                  {isCustomSub1 ? (
+                    <div className="flex items-center">
+                      <input
+                        type="text"
+                        value={sub1}
+                        onChange={(e) => setSub1(e.target.value)}
+                        placeholder="子分類1"
+                        className="w-16 px-1 py-0.5 text-xs bg-transparent border-none outline-none text-gray-600 placeholder-gray-400"
+                        autoFocus
+                      />
+                      <button
+                        onClick={() => setIsCustomSub1(false)}
+                        className="px-1 text-gray-500 hover:text-gray-700"
+                        title="選擇現有"
+                      >
+                        ↓
+                      </button>
+                    </div>
+                  ) : (
+                    <select
+                      value={sub1}
+                      onChange={(e) => {
+                        if (e.target.value === "__add_new__") {
+                          setIsCustomSub1(true);
+                          setSub1("");
+                        } else {
+                          setSub1(e.target.value);
+                          setSub2("");
+                          setSub3("");
+                        }
+                      }}
+                      className="px-1 py-0.5 text-xs bg-transparent border-none outline-none text-gray-600 cursor-pointer"
+                    >
+                      <option value="">無</option>
+                      {getSub1Options().map((sub) => (
+                        <option key={sub} value={sub}>
+                          {sub}
+                        </option>
+                      ))}
+                      <option value="__add_new__">+ 新增</option>
+                    </select>
+                  )}
+                </>
+              )}
+              {/* 子分類 2 */}
+              {sub1 && (
+                <>
+                  <span className="text-gray-400">/</span>
+                  {isCustomSub2 ? (
+                    <div className="flex items-center">
+                      <input
+                        type="text"
+                        value={sub2}
+                        onChange={(e) => setSub2(e.target.value)}
+                        placeholder="子分類2"
+                        className="w-16 px-1 py-0.5 text-xs bg-transparent border-none outline-none text-gray-600 placeholder-gray-400"
+                        autoFocus
+                      />
+                      <button
+                        onClick={() => setIsCustomSub2(false)}
+                        className="px-1 text-gray-500 hover:text-gray-700"
+                        title="選擇現有"
+                      >
+                        ↓
+                      </button>
+                    </div>
+                  ) : (
+                    <select
+                      value={sub2}
+                      onChange={(e) => {
+                        if (e.target.value === "__add_new__") {
+                          setIsCustomSub2(true);
+                          setSub2("");
+                        } else {
+                          setSub2(e.target.value);
+                          setSub3("");
+                        }
+                      }}
+                      className="px-1 py-0.5 text-xs bg-transparent border-none outline-none text-gray-600 cursor-pointer"
+                    >
+                      <option value="">無</option>
+                      {getSub2Options().map((sub) => (
+                        <option key={sub} value={sub}>
+                          {sub}
+                        </option>
+                      ))}
+                      <option value="__add_new__">+ 新增</option>
+                    </select>
+                  )}
+                </>
+              )}
+              {/* 子分類 3 */}
+              {sub2 && (
+                <>
+                  <span className="text-gray-400">/</span>
+                  {isCustomSub3 ? (
+                    <div className="flex items-center">
+                      <input
+                        type="text"
+                        value={sub3}
+                        onChange={(e) => setSub3(e.target.value)}
+                        placeholder="子分類3"
+                        className="w-16 px-1 py-0.5 text-xs bg-transparent border-none outline-none text-gray-500 placeholder-gray-400"
+                        autoFocus
+                      />
+                      <button
+                        onClick={() => setIsCustomSub3(false)}
+                        className="pr-2 text-gray-500 hover:text-gray-700"
+                        title="選擇現有"
+                      >
+                        ↓
+                      </button>
+                    </div>
+                  ) : (
+                    <select
+                      value={sub3}
+                      onChange={(e) => {
+                        if (e.target.value === "__add_new__") {
+                          setIsCustomSub3(true);
+                          setSub3("");
+                        } else {
+                          setSub3(e.target.value);
+                        }
+                      }}
+                      className="px-1 py-0.5 text-xs bg-transparent border-none outline-none text-gray-500 cursor-pointer pr-2"
+                    >
+                      <option value="">無</option>
+                      {getSub3Options().map((sub) => (
+                        <option key={sub} value={sub}>
+                          {sub}
+                        </option>
+                      ))}
+                      <option value="__add_new__">+ 新增</option>
+                    </select>
+                  )}
+                </>
+              )}
+            </div>
           ) : (
             item.category && (
               <span className="inline-flex items-center gap-1 text-xs text-gray-600 bg-gray-100 px-2 py-0.5 rounded-full">
                 <Tag size={12} />
                 {translateCategory(item.category)}
                 {item.subcategory1 && (
-                  <span className="text-gray-400">/ {translateCategory(item.subcategory1)}</span>
+                  <span className="text-gray-400">/ {item.subcategory1}</span>
+                )}
+                {item.subcategory2 && (
+                  <span className="text-gray-400">/ {item.subcategory2}</span>
+                )}
+                {item.subcategory3 && (
+                  <span className="text-gray-400">/ {item.subcategory3}</span>
                 )}
               </span>
             )
@@ -1123,7 +1747,7 @@ function KnowledgeCard({
           value={content}
           onChange={(e) => setContent(e.target.value)}
           onKeyDown={handleKeyDown}
-          className="mt-2 w-full text-sm text-gray-600 bg-white px-2 py-1 -mx-2 rounded border border-gray-200 outline-none focus:border-[#b20a2c] resize-none transition-all"
+          className="mt-2 w-full text-sm text-gray-600 bg-white px-2 py-1  rounded border border-gray-200 outline-none focus:border-[#b20a2c] resize-none transition-all"
           placeholder="內容"
         />
       ) : (
@@ -1134,12 +1758,14 @@ function KnowledgeCard({
 
       {/* Link editing */}
       {isEditing && (
-        <div className="mt-3 p-3 bg-white rounded-lg border border-gray-200">
+        <div className="mt-3 p-3 bg-white rounded-lg border border-gray-200 text-gray-600">
           <div className="flex items-center gap-2 mb-2">
-            <LinkIcon size={14} className="text-gray-500" />
-            <span className="text-xs text-gray-500">連結按鈕（選填）</span>
+            <LinkIcon size={14} className="" />
+            <span className="text-xs text-gray-600 font-medium">
+              連結按鈕（選填）
+            </span>
           </div>
-          <div className="flex gap-2">
+          <div className="flex gap-2 text-gray-600">
             <input
               type="text"
               value={linkText}
@@ -1170,7 +1796,7 @@ function KnowledgeCard({
             className="inline-flex items-center gap-1.5 text-sm text-[#b20a2c] hover:underline"
           >
             <LinkIcon size={14} />
-            {item.linkText || '連結'}
+            {item.linkText || "連結"}
           </a>
           <span className="text-xs text-gray-400 mt-0.5 break-all">
             {item.linkUrl}
@@ -1187,11 +1813,19 @@ function KnowledgeCard({
           </span>
           <div className="flex items-center gap-3">
             <span>
-              建立：{formatDistanceToNow(new Date(item.createdAt), { addSuffix: true, locale: zhTW })}
+              建立：
+              {formatDistanceToNow(new Date(item.createdAt), {
+                addSuffix: true,
+                locale: zhTW,
+              })}
             </span>
             {item.updatedAt !== item.createdAt && (
               <span>
-                修改：{formatDistanceToNow(new Date(item.updatedAt), { addSuffix: true, locale: zhTW })}
+                修改：
+                {formatDistanceToNow(new Date(item.updatedAt), {
+                  addSuffix: true,
+                  locale: zhTW,
+                })}
               </span>
             )}
           </div>
@@ -1203,7 +1837,7 @@ function KnowledgeCard({
 
 // ============ Summary View (AI 整理 + 儀表板) ============
 
-type TimeUnit = 'day' | 'week' | 'month';
+type TimeUnit = "day" | "week" | "month";
 
 interface CategoryStats {
   category: string;
@@ -1218,7 +1852,14 @@ interface AggregatedStats {
   endDate: Date;
 }
 
-function SummaryView({ slug }: { slug: string }) {
+function SummaryView({
+  slug,
+  isSharedView: _isSharedView = false,
+}: {
+  slug: string;
+  isSharedView?: boolean;
+}) {
+  // _isSharedView 可用於未來擴展顯示所有作者的統計
   const [loading, setLoading] = useState(true);
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [categories, setCategories] = useState<string[]>([]);
@@ -1235,12 +1876,12 @@ function SummaryView({ slug }: { slug: string }) {
     return d;
   });
   const [endDateObj, setEndDateObj] = useState<Date>(() => new Date());
-  const [timeUnit, setTimeUnit] = useState<TimeUnit>('day');
+  const [timeUnit, setTimeUnit] = useState<TimeUnit>("day");
   const [showDatePicker, setShowDatePicker] = useState(false);
 
   // 轉換為 string 格式用於篩選
-  const startDate = startDateObj.toISOString().split('T')[0];
-  const endDate = endDateObj.toISOString().split('T')[0];
+  const startDate = startDateObj.toISOString().split("T")[0];
+  const endDate = endDateObj.toISOString().split("T")[0];
 
   useEffect(() => {
     const handleResize = () => setIsMobile(window.innerWidth < 1024);
@@ -1273,7 +1914,7 @@ function SummaryView({ slug }: { slug: string }) {
   };
 
   // 根據日期範圍篩選數據
-  const filteredDailyStats = dailyStats.filter(s => {
+  const filteredDailyStats = dailyStats.filter((s) => {
     const date = s.date;
     return date >= startDate && date <= endDate;
   });
@@ -1284,33 +1925,40 @@ function SummaryView({ slug }: { slug: string }) {
 
     const result: AggregatedStats[] = [];
 
-    if (timeUnit === 'day') {
+    if (timeUnit === "day") {
       // 日維度：直接使用每日數據
-      filteredDailyStats.forEach(s => {
+      filteredDailyStats.forEach((s) => {
         const d = new Date(s.date);
         result.push({
-          label: format(d, 'MM/dd', { locale: zhTW }),
+          label: format(d, "MM/dd", { locale: zhTW }),
           count: s.userMessageCount,
           startDate: d,
           endDate: d,
         });
       });
-    } else if (timeUnit === 'week') {
+    } else if (timeUnit === "week") {
       // 週維度：按週聚合
-      const weekMap: Record<string, { count: number; startDate: Date; endDate: Date }> = {};
-      filteredDailyStats.forEach(s => {
+      const weekMap: Record<
+        string,
+        { count: number; startDate: Date; endDate: Date }
+      > = {};
+      filteredDailyStats.forEach((s) => {
         const d = new Date(s.date);
         // 取得該週的週一
         const day = d.getDay();
         const diff = d.getDate() - day + (day === 0 ? -6 : 1);
         const weekStart = new Date(d);
         weekStart.setDate(diff);
-        const weekKey = weekStart.toISOString().split('T')[0];
+        const weekKey = weekStart.toISOString().split("T")[0];
 
         if (!weekMap[weekKey]) {
           const weekEnd = new Date(weekStart);
           weekEnd.setDate(weekEnd.getDate() + 6);
-          weekMap[weekKey] = { count: 0, startDate: weekStart, endDate: weekEnd };
+          weekMap[weekKey] = {
+            count: 0,
+            startDate: weekStart,
+            endDate: weekEnd,
+          };
         }
         weekMap[weekKey].count += s.userMessageCount;
       });
@@ -1319,7 +1967,7 @@ function SummaryView({ slug }: { slug: string }) {
         .sort(([a], [b]) => a.localeCompare(b))
         .forEach(([_, data]) => {
           result.push({
-            label: `${format(data.startDate, 'MM/dd', { locale: zhTW })}`,
+            label: `${format(data.startDate, "MM/dd", { locale: zhTW })}`,
             count: data.count,
             startDate: data.startDate,
             endDate: data.endDate,
@@ -1327,15 +1975,22 @@ function SummaryView({ slug }: { slug: string }) {
         });
     } else {
       // 月維度：按月聚合
-      const monthMap: Record<string, { count: number; startDate: Date; endDate: Date }> = {};
-      filteredDailyStats.forEach(s => {
+      const monthMap: Record<
+        string,
+        { count: number; startDate: Date; endDate: Date }
+      > = {};
+      filteredDailyStats.forEach((s) => {
         const d = new Date(s.date);
-        const monthKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+        const monthKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
 
         if (!monthMap[monthKey]) {
           const monthStart = new Date(d.getFullYear(), d.getMonth(), 1);
           const monthEnd = new Date(d.getFullYear(), d.getMonth() + 1, 0);
-          monthMap[monthKey] = { count: 0, startDate: monthStart, endDate: monthEnd };
+          monthMap[monthKey] = {
+            count: 0,
+            startDate: monthStart,
+            endDate: monthEnd,
+          };
         }
         monthMap[monthKey].count += s.userMessageCount;
       });
@@ -1344,7 +1999,7 @@ function SummaryView({ slug }: { slug: string }) {
         .sort(([a], [b]) => a.localeCompare(b))
         .forEach(([_, data]) => {
           result.push({
-            label: format(data.startDate, 'yyyy/MM', { locale: zhTW }),
+            label: format(data.startDate, "yyyy/MM", { locale: zhTW }),
             count: data.count,
             startDate: data.startDate,
             endDate: data.endDate,
@@ -1356,47 +2011,70 @@ function SummaryView({ slug }: { slug: string }) {
   };
 
   const aggregatedStats = getAggregatedStats();
-  const filteredTotalMessages = filteredDailyStats.reduce((sum, s) => sum + s.userMessageCount, 0);
-  const filteredConversations = conversations.filter(c => {
-    const date = c.last_message_at.split('T')[0];
+  const filteredTotalMessages = filteredDailyStats.reduce(
+    (sum, s) => sum + s.userMessageCount,
+    0,
+  );
+  const filteredConversations = conversations.filter((c) => {
+    const date = c.last_message_at.split("T")[0];
     return date >= startDate && date <= endDate;
   });
   const filteredConversationCount = filteredConversations.length;
-  const avgQuestions = filteredConversationCount > 0 ? Math.round(filteredTotalMessages / filteredConversationCount) : 0;
+  const avgQuestions =
+    filteredConversationCount > 0
+      ? Math.round(filteredTotalMessages / filteredConversationCount)
+      : 0;
 
   // 按知識庫分類統計用戶訊息
   const getCategoryStats = (): CategoryStats[] => {
     // 建立分類映射（從知識庫）
-    const categoryMap: Record<string, { count: number; topics: Record<string, { count: number; isBug?: boolean }> }> = {};
+    const categoryMap: Record<
+      string,
+      {
+        count: number;
+        topics: Record<string, { count: number; isBug?: boolean }>;
+      }
+    > = {};
 
     // 初始化所有知識庫分類
-    categories.forEach(cat => {
+    categories.forEach((cat) => {
       categoryMap[cat] = { count: 0, topics: {} };
     });
 
     // 加入 "產品bug" 分類
-    categoryMap['產品bug'] = { count: 0, topics: {} };
+    categoryMap["產品bug"] = { count: 0, topics: {} };
     // 加入 "其他" 分類
-    categoryMap['其他'] = { count: 0, topics: {} };
+    categoryMap["其他"] = { count: 0, topics: {} };
 
     // 分析對話摘要並分類
-    conversations.forEach(conv => {
+    conversations.forEach((conv) => {
       if (!conv.summary) return;
 
       const summary = conv.summary.toLowerCase();
       let matched = false;
 
       // 檢查是否是 bug 相關
-      const bugKeywords = ['bug', '問題', '錯誤', '失敗', '無法', '壞掉', '故障', '異常', '不能用', '出錯'];
-      const isBug = bugKeywords.some(keyword => summary.includes(keyword));
+      const bugKeywords = [
+        "bug",
+        "問題",
+        "錯誤",
+        "失敗",
+        "無法",
+        "壞掉",
+        "故障",
+        "異常",
+        "不能用",
+        "出錯",
+      ];
+      const isBug = bugKeywords.some((keyword) => summary.includes(keyword));
 
       if (isBug) {
-        categoryMap['產品bug'].count += conv.message_count;
+        categoryMap["產品bug"].count += conv.message_count;
         const topic = conv.summary.slice(0, 40);
-        if (!categoryMap['產品bug'].topics[topic]) {
-          categoryMap['產品bug'].topics[topic] = { count: 0, isBug: true };
+        if (!categoryMap["產品bug"].topics[topic]) {
+          categoryMap["產品bug"].topics[topic] = { count: 0, isBug: true };
         }
-        categoryMap['產品bug'].topics[topic].count += 1;
+        categoryMap["產品bug"].topics[topic].count += 1;
         matched = true;
       }
 
@@ -1405,13 +2083,20 @@ function SummaryView({ slug }: { slug: string }) {
         for (const cat of categories) {
           const catLower = cat.toLowerCase();
           // 使用知識庫的標題和內容來匹配
-          const relatedKnowledge = knowledgeItems.filter(k => k.category === cat);
-          const keywords = relatedKnowledge.flatMap(k => [
-            k.title?.toLowerCase() || '',
-            ...(k.subcategory1?.toLowerCase().split(/\s+/) || []),
-          ]).filter(Boolean);
+          const relatedKnowledge = knowledgeItems.filter(
+            (k) => k.category === cat,
+          );
+          const keywords = relatedKnowledge
+            .flatMap((k) => [
+              k.title?.toLowerCase() || "",
+              ...(k.subcategory1?.toLowerCase().split(/\s+/) || []),
+            ])
+            .filter(Boolean);
 
-          if (keywords.some(kw => kw && summary.includes(kw)) || summary.includes(catLower)) {
+          if (
+            keywords.some((kw) => kw && summary.includes(kw)) ||
+            summary.includes(catLower)
+          ) {
             categoryMap[cat].count += conv.message_count;
             const topic = conv.summary.slice(0, 40);
             if (!categoryMap[cat].topics[topic]) {
@@ -1426,12 +2111,12 @@ function SummaryView({ slug }: { slug: string }) {
 
       // 未匹配的歸入其他
       if (!matched) {
-        categoryMap['其他'].count += conv.message_count;
+        categoryMap["其他"].count += conv.message_count;
         const topic = conv.summary.slice(0, 40);
-        if (!categoryMap['其他'].topics[topic]) {
-          categoryMap['其他'].topics[topic] = { count: 0 };
+        if (!categoryMap["其他"].topics[topic]) {
+          categoryMap["其他"].topics[topic] = { count: 0 };
         }
-        categoryMap['其他'].topics[topic].count += 1;
+        categoryMap["其他"].topics[topic].count += 1;
       }
     });
 
@@ -1445,11 +2130,11 @@ function SummaryView({ slug }: { slug: string }) {
           .sort((a, b) => b.count - a.count)
           .slice(0, 5),
       }))
-      .filter(c => c.count > 0)
+      .filter((c) => c.count > 0)
       .sort((a, b) => {
         // 產品bug 置頂
-        if (a.category === '產品bug') return -1;
-        if (b.category === '產品bug') return 1;
+        if (a.category === "產品bug") return -1;
+        if (b.category === "產品bug") return 1;
         return b.count - a.count;
       });
   };
@@ -1469,16 +2154,16 @@ function SummaryView({ slug }: { slug: string }) {
       await notifyBugToWebhook(slug, {
         title: topic,
         content: `用戶反映的問題：${topic}`,
-        category: '產品bug',
+        category: "產品bug",
       });
-      alert('已發送通知給 PM！');
+      alert("已發送通知給 PM！");
     } catch (error) {
-      console.error('Failed to send notification:', error);
-      alert('發送通知失敗');
+      console.error("Failed to send notification:", error);
+      alert("發送通知失敗");
     }
   };
 
-  const maxQuestions = Math.max(...aggregatedStats.map(s => s.count), 1);
+  const maxQuestions = Math.max(...aggregatedStats.map((s) => s.count), 1);
 
   return (
     <div className="h-full flex flex-col bg-white">
@@ -1490,7 +2175,9 @@ function SummaryView({ slug }: { slug: string }) {
               <BarChart3 size={20} className="text-[#b20a2c]" />
               數據分析
             </h2>
-            <p className="text-sm text-gray-500 mt-0.5">對話統計與用戶問題分析</p>
+            <p className="text-sm text-gray-500 mt-0.5">
+              對話統計與用戶問題分析
+            </p>
           </div>
 
           {/* 篩選器 */}
@@ -1502,13 +2189,19 @@ function SummaryView({ slug }: { slug: string }) {
                 className="flex items-center gap-2 px-4 py-2 border border-gray-200 rounded-lg text-sm text-gray-600 hover:bg-gray-50 transition-colors bg-white"
               >
                 <Calendar size={16} />
-                <span>{format(new Date(startDate), 'yyyy/MM/dd')} - {format(new Date(endDate), 'yyyy/MM/dd')}</span>
+                <span>
+                  {format(new Date(startDate), "yyyy/MM/dd")} -{" "}
+                  {format(new Date(endDate), "yyyy/MM/dd")}
+                </span>
                 <ChevronDown size={16} />
               </button>
 
               {showDatePicker && (
                 <>
-                  <div className="fixed inset-0 z-10" onClick={() => setShowDatePicker(false)} />
+                  <div
+                    className="fixed inset-0 z-10"
+                    onClick={() => setShowDatePicker(false)}
+                  />
                   <DateRangePicker
                     startDate={startDateObj}
                     endDate={endDateObj}
@@ -1524,17 +2217,17 @@ function SummaryView({ slug }: { slug: string }) {
 
             {/* 時間維度 */}
             <div className="flex rounded-lg border border-gray-200 overflow-hidden">
-              {(['day', 'week', 'month'] as TimeUnit[]).map((unit) => (
+              {(["day", "week", "month"] as TimeUnit[]).map((unit) => (
                 <button
                   key={unit}
                   onClick={() => setTimeUnit(unit)}
                   className={`px-4 py-2 text-sm font-medium transition-colors ${
                     timeUnit === unit
-                      ? 'bg-[#b20a2c] text-white'
-                      : 'bg-white text-gray-600 hover:bg-gray-50'
+                      ? "bg-[#b20a2c] text-white"
+                      : "bg-white text-gray-600 hover:bg-gray-50"
                   }`}
                 >
-                  {unit === 'day' ? '日' : unit === 'week' ? '週' : '月'}
+                  {unit === "day" ? "日" : unit === "week" ? "週" : "月"}
                 </button>
               ))}
             </div>
@@ -1552,9 +2245,9 @@ function SummaryView({ slug }: { slug: string }) {
             </div>
           </div>
         ) : (
-          <div className={`${isMobile ? 'space-y-6' : 'flex gap-6'}`}>
+          <div className={`${isMobile ? "space-y-6" : "flex gap-6"}`}>
             {/* 左側：總計 + 長條圖 */}
-            <div className={`${isMobile ? '' : 'flex-1'} space-y-6`}>
+            <div className={`${isMobile ? "" : "flex-1"} space-y-6`}>
               {/* 統計卡片 */}
               <div className="grid grid-cols-3 gap-4">
                 <div className="p-4 bg-[#fffbd5] rounded-xl border border-[#b20a2c]/20">
@@ -1562,7 +2255,9 @@ function SummaryView({ slug }: { slug: string }) {
                     <MessageSquare size={16} className="text-[#b20a2c]" />
                     <span className="text-xs text-gray-600">總訊息數</span>
                   </div>
-                  <p className="text-2xl font-bold text-gray-800">{filteredTotalMessages}</p>
+                  <p className="text-2xl font-bold text-gray-800">
+                    {filteredTotalMessages}
+                  </p>
                 </div>
 
                 <div className="p-4 bg-gray-50 rounded-xl border border-gray-200">
@@ -1570,7 +2265,9 @@ function SummaryView({ slug }: { slug: string }) {
                     <User size={16} className="text-gray-600" />
                     <span className="text-xs text-gray-600">總對話數</span>
                   </div>
-                  <p className="text-2xl font-bold text-gray-800">{filteredConversationCount}</p>
+                  <p className="text-2xl font-bold text-gray-800">
+                    {filteredConversationCount}
+                  </p>
                 </div>
 
                 <div className="p-4 bg-gray-50 rounded-xl border border-gray-200">
@@ -1578,7 +2275,9 @@ function SummaryView({ slug }: { slug: string }) {
                     <TrendingUp size={16} className="text-gray-600" />
                     <span className="text-xs text-gray-600">平均訊息</span>
                   </div>
-                  <p className="text-2xl font-bold text-gray-800">{avgQuestions}</p>
+                  <p className="text-2xl font-bold text-gray-800">
+                    {avgQuestions}
+                  </p>
                 </div>
               </div>
 
@@ -1587,27 +2286,38 @@ function SummaryView({ slug }: { slug: string }) {
                 <h3 className="font-medium text-gray-800 mb-4">
                   訊息數量趨勢
                   <span className="text-sm font-normal text-gray-500 ml-2">
-                    （按{timeUnit === 'day' ? '日' : timeUnit === 'week' ? '週' : '月'}）
+                    （按
+                    {timeUnit === "day"
+                      ? "日"
+                      : timeUnit === "week"
+                        ? "週"
+                        : "月"}
+                    ）
                   </span>
                 </h3>
                 {aggregatedStats.length > 0 ? (
-                  <div
-                    ref={chartContainerRef}
-                    className="overflow-x-auto pb-2"
-                  >
+                  <div ref={chartContainerRef} className="overflow-x-auto pb-2">
                     <div
                       className="h-48 flex items-end gap-1"
-                      style={{ minWidth: `${Math.max(aggregatedStats.length * 50, 300)}px` }}
+                      style={{
+                        minWidth: `${Math.max(aggregatedStats.length * 50, 300)}px`,
+                      }}
                     >
                       {aggregatedStats.map((s, index) => (
-                        <div key={index} className="flex-1 flex flex-col items-center min-w-[40px]">
-                          <span className="text-xs text-gray-500 mb-1">{s.count > 0 ? s.count : ''}</span>
+                        <div
+                          key={index}
+                          className="flex-1 flex flex-col items-center min-w-[40px]"
+                        >
+                          <span className="text-xs text-gray-500 mb-1">
+                            {s.count > 0 ? s.count : ""}
+                          </span>
                           <div
                             className="w-full rounded-t transition-all hover:opacity-80 cursor-pointer"
                             style={{
                               height: `${Math.max((s.count / maxQuestions) * 140, s.count > 0 ? 4 : 0)}px`,
-                              background: 'linear-gradient(to top, #b20a2c, #e53e3e)',
-                              minHeight: s.count > 0 ? '4px' : '0'
+                              background:
+                                "linear-gradient(to top, #b20a2c, #e53e3e)",
+                              minHeight: s.count > 0 ? "4px" : "0",
                             }}
                             title={`${s.label}: ${s.count} 則訊息`}
                           />
@@ -1624,13 +2334,17 @@ function SummaryView({ slug }: { slug: string }) {
                   </div>
                 )}
                 {dailyStats.length > 5 && (
-                  <p className="text-xs text-gray-400 mt-2 text-center">← 左右滑動查看更多 →</p>
+                  <p className="text-xs text-gray-400 mt-2 text-center">
+                    ← 左右滑動查看更多 →
+                  </p>
                 )}
               </div>
             </div>
 
             {/* 右側：按分類的用戶常見訊息（使用知識庫相同的 Tab 風格） */}
-            <div className={`${isMobile ? '' : 'w-[400px]'} flex flex-col bg-white rounded-xl border border-gray-200 overflow-hidden`}>
+            <div
+              className={`${isMobile ? "" : "w-[400px]"} flex flex-col bg-white rounded-xl border border-gray-200 overflow-hidden`}
+            >
               {/* 分類 Tabs */}
               <div className="px-4 pt-4 pb-2 border-b border-gray-100">
                 <div className="flex gap-2 overflow-x-auto pb-2">
@@ -1640,17 +2354,19 @@ function SummaryView({ slug }: { slug: string }) {
                       onClick={() => setActiveCategory(cat.category)}
                       className={`px-4 py-1.5 rounded-full text-sm font-medium whitespace-nowrap transition-colors ${
                         activeCategory === cat.category
-                          ? cat.category === '產品bug'
-                            ? 'bg-red-500 text-white'
-                            : 'bg-[#b20a2c] text-white'
-                          : cat.category === '產品bug'
-                            ? 'bg-red-50 text-red-600 hover:bg-red-100'
-                            : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                          ? cat.category === "產品bug"
+                            ? "bg-red-500 text-white"
+                            : "bg-[#b20a2c] text-white"
+                          : cat.category === "產品bug"
+                            ? "bg-red-50 text-red-600 hover:bg-red-100"
+                            : "bg-gray-100 text-gray-600 hover:bg-gray-200"
                       }`}
                     >
-                      {cat.category === '產品bug' && '🐛 '}
+                      {cat.category === "產品bug" && "🐛 "}
                       {cat.category}
-                      <span className="ml-1 text-xs opacity-75">({cat.count})</span>
+                      <span className="ml-1 text-xs opacity-75">
+                        ({cat.count})
+                      </span>
                     </button>
                   ))}
                 </div>
@@ -1661,28 +2377,36 @@ function SummaryView({ slug }: { slug: string }) {
                 {categoryStats.length > 0 ? (
                   <div className="space-y-3">
                     {categoryStats
-                      .find(c => c.category === activeCategory)
+                      .find((c) => c.category === activeCategory)
                       ?.topics.map((topic, topicIndex) => (
                         <div
                           key={topicIndex}
                           className={`p-4 rounded-xl border ${
                             topic.isBug
-                              ? 'bg-red-50 border-red-200'
-                              : 'bg-gray-50 border-gray-100'
+                              ? "bg-red-50 border-red-200"
+                              : "bg-gray-50 border-gray-100"
                           }`}
                         >
                           <div className="flex items-start gap-3">
-                            <span className={`text-xs font-bold w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0 ${
-                              topic.isBug ? 'bg-red-500 text-white' : 'bg-[#b20a2c] text-white'
-                            }`}>
+                            <span
+                              className={`text-xs font-bold w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0 ${
+                                topic.isBug
+                                  ? "bg-red-500 text-white"
+                                  : "bg-[#b20a2c] text-white"
+                              }`}
+                            >
                               {topicIndex + 1}
                             </span>
                             <div className="flex-1 min-w-0">
-                              <p className={`text-sm ${topic.isBug ? 'text-red-700' : 'text-gray-800'}`}>
+                              <p
+                                className={`text-sm ${topic.isBug ? "text-red-700" : "text-gray-800"}`}
+                              >
                                 {topic.topic}
                               </p>
                               <div className="flex items-center gap-2 mt-2">
-                                <span className="text-xs text-gray-500">{topic.count} 次提問</span>
+                                <span className="text-xs text-gray-500">
+                                  {topic.count} 次提問
+                                </span>
                                 {topic.isBug && (
                                   <button
                                     onClick={() => handleNotifyBug(topic.topic)}
@@ -1696,10 +2420,10 @@ function SummaryView({ slug }: { slug: string }) {
                           </div>
                         </div>
                       )) || (
-                        <div className="text-center text-gray-400 py-8">
-                          <p>此分類暫無數據</p>
-                        </div>
-                      )}
+                      <div className="text-center text-gray-400 py-8">
+                        <p>此分類暫無數據</p>
+                      </div>
+                    )}
                   </div>
                 ) : (
                   <div className="flex flex-col items-center justify-center h-48 text-gray-400">

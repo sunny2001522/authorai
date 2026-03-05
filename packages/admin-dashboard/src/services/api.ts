@@ -1,3 +1,5 @@
+import { convertBlobToWav } from '../utils/audioConverter';
+
 const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3001';
 
 // ============ Authors ============
@@ -124,6 +126,48 @@ export async function recallAdminMessage(
     }
   );
   if (!response.ok) throw new Error('Failed to recall message');
+  return response.json();
+}
+
+// ============ Conversation Search ============
+
+export interface ConversationSearchResult {
+  conversation_id: string;
+  conversation_summary: string | null;
+  message_id: string | null;
+  message_content: string | null;
+  message_role: 'user' | 'assistant' | null;
+  message_created_at: string | null;
+  last_message_at: string;
+  message_count: number;
+  match_type: 'summary' | 'message';
+}
+
+export interface SearchConversationsParams {
+  q: string;
+  startDate?: string;  // YYYY-MM-DD
+  endDate?: string;    // YYYY-MM-DD
+  limit?: number;
+}
+
+export async function searchConversations(
+  slug: string,
+  params: SearchConversationsParams
+): Promise<{
+  results: ConversationSearchResult[];
+  query: string;
+  total: number;
+}> {
+  const queryParams = new URLSearchParams();
+  queryParams.set('q', params.q);
+  if (params.startDate) queryParams.set('startDate', params.startDate);
+  if (params.endDate) queryParams.set('endDate', params.endDate);
+  if (params.limit) queryParams.set('limit', params.limit.toString());
+
+  const response = await fetch(
+    `${API_BASE}/admin/${slug}/conversations/search?${queryParams.toString()}`
+  );
+  if (!response.ok) throw new Error('Failed to search conversations');
   return response.json();
 }
 
@@ -255,8 +299,18 @@ export async function deleteKnowledge(
 // ============ Transcription ============
 
 export async function transcribeAudio(audioBlob: Blob): Promise<{ text: string; success: boolean }> {
+  // 將 WebM 轉換成 WAV 格式，確保 Whisper API 能正確解析
+  let wavBlob: Blob;
+  try {
+    wavBlob = await convertBlobToWav(audioBlob);
+    console.log(`[transcribeAudio] Converted ${audioBlob.size} bytes WebM to ${wavBlob.size} bytes WAV`);
+  } catch (err) {
+    console.error('[transcribeAudio] WAV conversion failed, using original:', err);
+    wavBlob = audioBlob;
+  }
+
   const formData = new FormData();
-  formData.append('audio', audioBlob, 'audio.webm');
+  formData.append('audio', wavBlob, 'audio.wav');
 
   const response = await fetch(`${API_BASE}/admin/transcribe`, {
     method: 'POST',

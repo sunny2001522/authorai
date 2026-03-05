@@ -19,6 +19,7 @@ import {
   recallAdminMessage,
   getKnowledgeWithoutEmbedding,
   updateKnowledgeEmbedding,
+  searchConversations,
 } from '../services/supabase';
 import { transcribeAudio } from '../services/whisper';
 import { processKnowledgeContent } from '../services/gemini';
@@ -134,6 +135,35 @@ adminRouter.get('/:slug/info', getAuthor, async (req: any, res: any) => {
 });
 
 // ============ Conversations ============
+
+// GET /admin/:slug/conversations/search
+// Search conversations by keyword and date range
+// NOTE: This route MUST be before /:slug/conversations/:convId to avoid route conflict
+adminRouter.get('/:slug/conversations/search', getAuthor, async (req: any, res: any) => {
+  try {
+    const { author } = req;
+    const { q, startDate, endDate, limit } = req.query;
+
+    if (!q || !(q as string).trim()) {
+      return res.status(400).json({ error: 'Missing search query (q)' });
+    }
+
+    const results = await searchConversations(author.id, (q as string).trim(), {
+      startDate: startDate as string,
+      endDate: endDate as string,
+      limit: limit ? parseInt(limit as string, 10) : 50,
+    });
+
+    res.json({
+      results,
+      query: (q as string).trim(),
+      total: results.length,
+    });
+  } catch (error) {
+    console.error('Error searching conversations:', error);
+    res.status(500).json({ error: 'Search failed' });
+  }
+});
 
 // GET /admin/:slug/conversations
 // List all conversations for an author
@@ -477,6 +507,7 @@ adminRouter.put('/:slug/knowledge/:itemId', getAuthor, async (req: any, res: any
     const { itemId } = req.params;
     const { title, content, category, subcategory1, subcategory2, subcategory3, linkText, linkUrl } = req.body;
 
+    // 空字串轉為 null，以便在資料庫中清除連結
     await updateKnowledgeItem(author.id, itemId, {
       title,
       content,
@@ -484,8 +515,8 @@ adminRouter.put('/:slug/knowledge/:itemId', getAuthor, async (req: any, res: any
       subcategory1,
       subcategory2,
       subcategory3,
-      link_text: linkText,
-      link_url: linkUrl,
+      link_text: linkText || null,
+      link_url: linkUrl || null,
     });
 
     res.json({ success: true });

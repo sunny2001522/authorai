@@ -720,6 +720,134 @@ export async function markMessagesAsRead(messageIds: string[]): Promise<void> {
     .in('id', messageIds);
 }
 
+// ============ Conversation Search ============
+
+export interface ConversationSearchResult {
+  conversation_id: string;
+  conversation_summary: string | null;
+  message_id: string | null;
+  message_content: string | null;
+  message_role: 'user' | 'assistant' | null;
+  message_created_at: string | null;
+  last_message_at: string;
+  message_count: number;
+  match_type: 'summary' | 'message';
+}
+
+/**
+ * 搜尋對話紀錄（關鍵字搜尋）
+ * 搜尋範圍：對話摘要 + 訊息內容
+ */
+export async function searchConversations(
+  authorId: string,
+  query: string,
+  options?: {
+    startDate?: string;  // YYYY-MM-DD
+    endDate?: string;    // YYYY-MM-DD
+    limit?: number;
+  }
+): Promise<ConversationSearchResult[]> {
+  const client = getSupabase();
+  const limit = options?.limit || 50;
+
+  // 1. 基礎查詢：該作者的所有對話
+  let convQuery = client
+    .from('conversations')
+    .select('*')
+    .eq('author_id', authorId);
+
+  // 2. 日期範圍過濾
+  if (options?.startDate) {
+    convQuery = convQuery.gte('last_message_at', `${options.startDate}T00:00:00`);
+  }
+  if (options?.endDate) {
+    convQuery = convQuery.lte('last_message_at', `${options.endDate}T23:59:59`);
+  }
+
+  const { data: conversations, error: convError } = await convQuery
+    .order('last_message_at', { ascending: false });
+
+  if (convError || !conversations || conversations.length === 0) return [];
+
+  const searchTerm = query.trim().toLowerCase();
+  const results: ConversationSearchResult[] = [];
+  const addedConvIds = new Set<string>();
+
+  // 3. 搜尋摘要匹配的對話
+  for (const conv of conversations) {
+    if (conv.summary?.toLowerCase().includes(searchTerm)) {
+      results.push({
+        conversation_id: conv.id,
+        conversation_summary: conv.summary,
+        message_id: null,
+        message_content: null,
+        message_role: null,
+        message_created_at: null,
+        last_message_at: conv.last_message_at,
+        message_count: conv.message_count,
+        match_type: 'summary',
+      });
+      addedConvIds.add(conv.id);
+    }
+  }
+
+  // 4. 搜尋訊息內容匹配的對話
+  const conversationIds = conversations.map(c => c.id);
+
+  // 建立訊息查詢
+  let msgQuery = client
+    .from('messages')
+    .select('id, conversation_id, role, content, created_at')
+    .in('conversation_id', conversationIds)
+    .ilike('content', `%${query}%`)
+    .or('is_recalled.is.null,is_recalled.eq.false');
+
+  // 日期範圍過濾訊息
+  if (options?.startDate) {
+    msgQuery = msgQuery.gte('created_at', `${options.startDate}T00:00:00`);
+  }
+  if (options?.endDate) {
+    msgQuery = msgQuery.lte('created_at', `${options.endDate}T23:59:59`);
+  }
+
+  const { data: messages } = await msgQuery
+    .order('created_at', { ascending: false })
+    .limit(limit * 2);  // 取多一些，因為可能有重複對話
+
+  if (messages) {
+    // 建立對話 ID 到對話物件的映射
+    const convMap = new Map(conversations.map(c => [c.id, c]));
+
+    for (const msg of messages) {
+      // 避免重複添加同一對話（如果已經通過摘要匹配）
+      if (!addedConvIds.has(msg.conversation_id)) {
+        const conv = convMap.get(msg.conversation_id);
+        if (conv) {
+          results.push({
+            conversation_id: conv.id,
+            conversation_summary: conv.summary,
+            message_id: msg.id,
+            message_content: msg.content,
+            message_role: msg.role,
+            message_created_at: msg.created_at,
+            last_message_at: conv.last_message_at,
+            message_count: conv.message_count,
+            match_type: 'message',
+          });
+          addedConvIds.add(msg.conversation_id);
+        }
+      }
+    }
+  }
+
+  // 5. 按最後訊息時間排序並限制數量
+  results.sort((a, b) =>
+    new Date(b.last_message_at).getTime() - new Date(a.last_message_at).getTime()
+  );
+
+  return results.slice(0, limit);
+}
+
 // ============ Knowledge Hit Count Operations ============
 
 /**

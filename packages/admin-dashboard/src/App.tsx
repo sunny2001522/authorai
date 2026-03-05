@@ -10,6 +10,10 @@ function App() {
         {/* Root redirects to first author or shows empty state */}
         <Route index element={<AuthorDashboard />} />
 
+        {/* 通用知識庫路由（只有知識庫） */}
+        <Route path="shared" element={<AuthorDashboard />} />
+        <Route path="shared/knowledge" element={<AuthorDashboard />} />
+
         {/* Author specific routes */}
         <Route path=":slug" element={<AuthorDashboard />} />
         <Route path=":slug/conversations" element={<AuthorDashboard />} />
