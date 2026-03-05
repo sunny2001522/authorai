@@ -1161,17 +1161,17 @@ function KnowledgeView({
     loadCategories();
   }, [slug, refreshKey, isSharedView, context?.authors]);
 
+  // 取得正確的 API slug（通用頁面使用第一個作者的 slug）
+  const getApiSlug = () => {
+    return isSharedView && context?.authors?.length > 0
+      ? context.authors[0].slug
+      : slug;
+  };
+
   const loadItems = async () => {
     setLoading(true);
     try {
-      // 通用頁面：使用第一個作者的 slug 來取得資料，再過濾出共用知識
-      // 作者頁面：使用該作者的 slug
-      const apiSlug =
-        isSharedView && context?.authors?.length > 0
-          ? context.authors[0].slug
-          : slug;
-
-      const data = await getKnowledgeItems(apiSlug);
+      const data = await getKnowledgeItems(getApiSlug());
 
       // 根據頁面類型過濾知識項目
       // isSharedView: 只顯示共用知識（authorId 為 null）
@@ -1189,11 +1189,7 @@ function KnowledgeView({
 
   const loadCategories = async () => {
     try {
-      const apiSlug =
-        isSharedView && context?.authors?.length > 0
-          ? context.authors[0].slug
-          : slug;
-      const data = await getCategories(apiSlug);
+      const data = await getCategories(getApiSlug());
       setAllCategories(data.categories);
       setSubcategory1Map(data.subcategory1Map);
       setSubcategory2Map(data.subcategory2Map || {});
@@ -1206,7 +1202,7 @@ function KnowledgeView({
   const handleDelete = async (itemId: string) => {
     if (!confirm("確定要刪除這筆知識嗎？")) return;
     try {
-      await deleteKnowledge(slug, itemId);
+      await deleteKnowledge(getApiSlug(), itemId);
       setItems((prev) => prev.filter((i) => i.id !== itemId));
     } catch (error) {
       console.error("Failed to delete:", error);
@@ -1228,7 +1224,7 @@ function KnowledgeView({
     },
   ) => {
     try {
-      await updateKnowledge(slug, itemId, updates);
+      await updateKnowledge(getApiSlug(), itemId, updates);
       setItems((prev) =>
         prev.map((i) => (i.id === itemId ? { ...i, ...updates } : i)),
       );
@@ -1241,11 +1237,7 @@ function KnowledgeView({
 
   const handleAddNew = async () => {
     try {
-      const apiSlug =
-        isSharedView && context?.authors?.length > 0
-          ? context.authors[0].slug
-          : slug;
-      const result = await addTextKnowledge(apiSlug, {
+      const result = await addTextKnowledge(getApiSlug(), {
         title: "新知識",
         content: "（請填寫內容）",
         isShared: isSharedView,
