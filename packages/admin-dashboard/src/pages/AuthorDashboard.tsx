@@ -1247,14 +1247,14 @@ function KnowledgeView({
           : slug;
       const result = await addTextKnowledge(apiSlug, {
         title: "新知識",
-        content: "",
+        content: "（請填寫內容）",
         isShared: isSharedView,
       });
       const now = new Date().toISOString();
       const newItem: KnowledgeItem = {
         id: result.id,
         title: "新知識",
-        content: "",
+        content: "（請填寫內容）",
         category: "",
         subcategory1: "",
         subcategory2: "",
