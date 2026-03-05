@@ -31,7 +31,12 @@ export async function transcribeAudio(audioBuffer: Buffer, mimeType: string = 'a
 
   // 直接使用 fetch 呼叫 OpenAI API（不使用 SDK）
   const formData = new FormData();
-  const blob = new Blob([audioBuffer], { type: baseMimeType });
+  // 將 Buffer 轉為 ArrayBuffer 以避免 TypeScript 類型問題
+  const arrayBuffer = audioBuffer.buffer.slice(
+    audioBuffer.byteOffset,
+    audioBuffer.byteOffset + audioBuffer.length
+  ) as ArrayBuffer;
+  const blob = new Blob([arrayBuffer], { type: baseMimeType });
   formData.append('file', blob, filename);
   formData.append('model', 'whisper-1');
   formData.append('language', 'zh');
